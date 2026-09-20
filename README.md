@@ -4,7 +4,7 @@ An academic project: a repository-aware AI assistant that answers questions abou
 using evidence retrieved from that codebase, and cites the files, functions and line ranges
 it used.
 
-> **Status: Milestone 4 (embedding service; real-model validation pending).** Only the foundation,
+> **Status: Milestone 4 (embedding service, validated with the real model on Windows).** Only the foundation,
 > repository ingestion, baseline chunking and a local embedding service exist. Retrieval, the RAG pipeline, agents and the UI described
 > below are **planned and do not exist yet.** See
 > [Current implementation status](#current-implementation-status).
@@ -60,7 +60,7 @@ The full design, technology decisions, milestones and evaluation plan are in
 | Configuration | `pydantic-settings` (`.env`, environment variables) | **Implemented now** |
 | Logging | Standard library `logging` with secret redaction | **Implemented now** |
 | Testing / lint | `pytest`, `pytest-cov`, `ruff` | **Implemented now** |
-| Embeddings | `fastembed` (ONNX), `jina-embeddings-v2-base-code`, fallback `bge-small-en-v1.5` (unused) | **Implemented (Milestone 4); real model not yet run here** |
+| Embeddings | `fastembed` (ONNX), `jina-embeddings-v2-base-code`, fallback `bge-small-en-v1.5` (unused) | **Implemented and validated on Windows (Milestone 4)** |
 | Vector store | FAISS `IndexFlatIP` + JSON sidecar + manifest | Planned (next milestone) |
 | LLM | Gemini via `google-genai`; Ollama optional fallback | Planned (Milestone 6) |
 | Interface | Streamlit | Planned (Milestone 7) |
@@ -116,9 +116,12 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   (768-d, unit-length vectors), a deterministic fake for tests, batching, a documented model cache,
   a chunk-to-embedding-text representation (metadata prefix, raw source untouched), `chunk_id <->
   vector` pairing, and tooling that measures the token estimator against the real tokenizer.
-  **Not yet validated against the real model** (it could not be downloaded in the development
-  sandbox), so the estimated-vs-actual results are pending. No vector index and no retrieval exist.
-  Details, verified facts and open items: [`docs/embeddings.md`](docs/embeddings.md).
+  Validated on native Windows with the real model (768-d unit vectors, 8192-token limit). On this
+  repository the heuristic estimator **systematically underestimates** the real Jina tokenizer
+  (89% of chunks; about 14.5% in total), which is safe (largest embedded chunk 736 of 8192 tokens);
+  chunk defaults are unchanged and the metadata-prefixed text is the default with its retrieval
+  benefit **unproven**. No vector index and no retrieval exist yet. Measurements, decisions and the
+  planned retrieval experiment: [`docs/embeddings.md`](docs/embeddings.md).
 - Unit, integration and security tests for the above (run against synthetic repositories).
 
 **Planned (not implemented; do not expect these to work)**
@@ -187,7 +190,7 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | 1 | Project foundation | Done |
 | 2 | Safe repository ingestion | Done |
 | 3 | Baseline chunking | Done |
-| 4 | Embedding service and tokenizer validation | **Implemented; real-model measurements pending** |
+| 4 | Embedding service and tokenizer validation | **Done (validated on Windows)** |
 | 5-7 | Vector store and retrieval, basic RAG, Streamlit MVP | Planned |
 | 8-11 | LangGraph, structure-aware chunking, two experiments | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |

@@ -170,9 +170,10 @@ contained in another; every non-blank line is covered by at least one chunk.
   points. On this repository at commit `9e3586f`: 220 chunks, median 490 / p95 511 estimated
   tokens, 5343 source lines represented, 1491 lines duplicated by overlap, and 89% of non-final
   chunks shortened by the cap (see `docs/embeddings.md` for the cap sweep).
-* The token estimator is provisional: its comparison with the real embedding tokenizer is implemented
-  (`python -m copilot.embeddings tokens`, see `docs/embeddings.md`) but has not yet been run against
-  the real model.
+* The token estimator is a heuristic. Measured against the real Jina tokenizer on this repository
+  (Windows, 294 chunks) it **underestimates** in 89.1% of chunks (actual/estimated median 1.12,
+  max 1.73; 124,190 estimated vs 142,230 actual in total). This is safe against the 8192-token
+  model limit and is left unchanged; see `docs/embeddings.md`.
 * JSON/YAML windows can cut mid-structure.
 * Chunks do not yet include a file-path/context header for embedding (decided in Milestone 4).
 * The id contract identifies repositories by `repository_name` only (see above).

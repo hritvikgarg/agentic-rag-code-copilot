@@ -1,15 +1,15 @@
 # Embeddings (Milestone 4)
 
-Local embedding service behind a small interface, plus tooling to validate the Milestone 3
-token estimator against the real embedding tokenizer.
+Local embedding service behind a small interface, validated against the real
+`jinaai/jina-embeddings-v2-base-code` model on native Windows, including a measurement of the
+Milestone 3 token estimator against the model's real tokenizer.
 
-> **Validation status (read this first).** Everything below marked **Verified** was checked by
-> reading the installed fastembed 0.8.0 source, running the test suite, or running the CLI.
-> The real Jina model could **not** be downloaded in the development sandbox (the network
-> allowlist blocks `huggingface.co`), so the following are **not yet measured**: the real model's
-> actual output, the real tokenizer's token counts, and therefore the estimated-vs-actual
-> comparison. Those measurements are produced by commands you run once (see "Measure it
-> yourself"); no number in this document was invented to fill that gap.
+> **Provenance of numbers.** Numbers labelled *Windows* were measured by the project owner on
+> native Windows (Python 3.12.5, fastembed 0.8.0, onnxruntime CPU) against the tree at commit
+> `163bd34` (its chunk counts, 294 / 230 / 207 / 196 for the four caps below, reproduce exactly with
+> `git archive 163bd34`). Numbers labelled *tokenizer-free* were computed in the Linux development
+> sandbox, which cannot reach `huggingface.co` and therefore never ran the real model. Nothing in
+> this document is estimated to fill a gap; a figure that was not reported is not shown.
 
 ## What embeddings are, and why we use them
 
@@ -29,41 +29,32 @@ query time; the nearest chunk vectors are the candidate evidence (Milestone 5).
 miss relevant code or fall back on the LLM's general knowledge, which is what this project exists
 to avoid.
 
-## Selected model
+## Selected model and validation status
 
 `jinaai/jina-embeddings-v2-base-code`, run locally through fastembed (ONNX Runtime). It was the
-approved preferred model; it has **not** been replaced by the fallback, because it did not fail
-for a technical reason (see below). Nothing is sent to an external API.
+approved preferred model and is now **validated**; the BGE-small fallback was never needed. Nothing
+is sent to an external API.
 
 | Fact | Value | Status |
 |---|---|---|
-| Supported by fastembed 0.8.0 | yes, in `PooledNormalizedEmbedding` | **Verified** (source + `list_supported_models()`) |
-| Model identifier | `jinaai/jina-embeddings-v2-base-code` (Hugging Face repo of the same name) | **Verified** (registry entry) |
-| Dimension | 768 | **Verified** (registry); runtime shape is checked on every call |
-| ONNX file | `onnx/model.onnx`, ~0.64 GB | **Verified** (registry) |
-| License | Apache-2.0 | **Verified** (registry) |
-| Pooling / normalisation inside fastembed | mean pooling over attention mask, then L2 normalisation | **Verified** (source of `PooledNormalizedEmbedding`) |
-| Advertised input limit | "8192 input tokens truncation" | **Verified as fastembed's description only**; not yet read from the model's own files |
-| Query/document prefixes needed | "not necessary" | **Verified** (registry description) |
-| Wheels for Windows (cp312 win_amd64) | onnxruntime, tokenizers, numpy, pillow, ... all present in `uv.lock` | **Verified** (lock file) |
-| PyTorch required | no (onnxruntime only) | **Verified** (not in the lock file) |
-| Real model download and inference | - | **Not verified**: blocked in the sandbox |
+| Supported by fastembed 0.8.0 | yes, `PooledNormalizedEmbedding` | Verified (source, registry) and works on Windows |
+| Model identifier | `jinaai/jina-embeddings-v2-base-code` | Verified (registry; live test asserts it) |
+| Dimension | 768 | **Windows: measured** (vector and query shapes are `(768,)`) |
+| Input limit | 8192 tokens | **Windows: measured**: `smoke` reports max input tokens 8192, the tokenizer truncation length fastembed reads from the model files |
+| Output normalisation | unit length | **Windows: measured**: norm min/max 1.000000 / 1.000000 |
+| Values finite | yes | **Windows: measured** |
+| Determinism | identical repeat | **Windows: measured**: max absolute difference 0.000e+00 on repeat |
+| Download size / license | ~0.64 GB / Apache-2.0 | Registry values |
+| PyTorch required | no | Verified (not in `uv.lock`) |
+| Live tests (`COPILOT_RUN_LIVE=1`) | 3 of 3 passed on Windows | Measured: model identity and dimension; finite, unit-length, deterministic vectors; untruncated positive token counts |
 
-### Why the real model was not run in the sandbox
+Windows runtime: `fastembed-onnx` 0.8.0. First load including download took 43.45 s; 8 vectors were
+embedded in 2.41 s (about 3.3 texts/s; CPU model and thread count were not recorded, and the 8
+chunks were typical ~500-token texts). Peak memory was not recorded.
 
-Attempted: `python -m copilot.embeddings smoke` (loads the configured model). Exact result:
-
-```text
-error: could not load embedding model 'jinaai/jina-embeddings-v2-base-code'
-(ProxyError: 403 Forbidden). Check network access to huggingface.co ...
-```
-
-Cause classification: **environment issue**, not a fastembed, ONNX or model issue. `huggingface.co`
-(and `cdn-lfs.huggingface.co`, fastembed's other download hosts) answer HTTP 403 with
-`X-Proxy-Error: blocked-by-allowlist` from both the cloud container and the desktop VM; PyPI is
-reachable. The dependency install, model-registry lookup and the whole runtime path (with a tiny
-synthetic ONNX model) work. Because the model itself never failed, the BGE-small fallback was
-**not** adopted.
+History: the development sandbox could not download the model (`ProxyError: 403`,
+`X-Proxy-Error: blocked-by-allowlist` for `huggingface.co`, an environment/network-policy issue,
+not a fastembed, ONNX or model defect), which is why the real-model validation was run on Windows.
 
 ## Interface
 
@@ -99,9 +90,8 @@ original exception preserved as `__cause__`.
 search time.** Cosine similarity `a.b / (|a||b|)` equals the plain dot product when both vectors
 have length 1, so the vector index (FAISS `IndexFlatIP` next milestone) needs no extra step and can
 never mix normalised and un-normalised vectors. The step is idempotent: the Jina model already
-returns unit vectors through fastembed, and the adapter guarantees it regardless of library
-behaviour (a test feeds it un-normalised output). `EmbeddingModelInfo.normalized` is therefore
-always `True`.
+returns unit vectors through fastembed (confirmed on Windows), and the adapter guarantees it
+regardless of library behaviour. `EmbeddingModelInfo.normalized` is therefore always `True`.
 
 ## Query vs document behaviour
 
@@ -113,9 +103,10 @@ in the same 768-dimensional space.
 
 `embedding_batch_size` (default 32, env `COPILOT_EMBEDDING_BATCH_SIZE`) is the number of texts per
 ONNX forward pass; fastembed pads each batch to its longest text. Order is preserved across
-batches (tested with a real fastembed/onnxruntime stub, including padded multi-batch runs that
-must equal one-at-a-time results). The default is a conservative guess that is **not tuned**;
-throughput and memory on the real model are unmeasured.
+batches (tested on the real fastembed/onnxruntime stack with a synthetic model: batched results
+equal one-at-a-time results). The default is **untuned**. The only real-model speed measurement is
+about 3.3 texts/s on the owner's Windows machine for 8 chunks; extrapolating, indexing a few hundred
+chunks takes on the order of a minute or two on that machine (an extrapolation, not a measurement).
 
 ## Model cache
 
@@ -125,6 +116,16 @@ would force a 0.64 GB re-download. We always pass an explicit directory:
 `.gitignore`), overridable with `COPILOT_EMBEDDING_CACHE_DIR`. `.gitignore` also ignores `*.onnx`
 and `*.safetensors`. Set `HF_HUB_OFFLINE=1` to forbid network access once the model is cached.
 `python -m copilot.embeddings info` prints the cache path.
+
+### Windows: Hugging Face cache symlink warning (non-fatal)
+
+On the validated Windows machine, `huggingface_hub` printed a warning that its cache cannot use
+symlinks and is running in degraded mode. **This is non-fatal:** the model downloaded, loaded and
+cached, and all measurements and live tests succeeded. Windows only allows symlinks for
+administrators or with Developer Mode enabled; the degraded mode copies files instead (this can use
+more disk space when several model revisions are cached; with a single ~0.64 GB model it is
+negligible). **Do not enable Administrator mode or Developer Mode just to silence it.** If the
+message is a nuisance, `HF_HUB_DISABLE_SYMLINKS_WARNING=1` hides it without changing behaviour.
 
 ## Embedding text representation
 
@@ -144,84 +145,113 @@ included (an index covers one repository). `embedding_text_style` selects `prefi
 `raw`. `REPRESENTATION_VERSION` (currently 1) belongs in index manifests: vectors from different
 representations are not comparable.
 
-**Not claimed:** that the prefix improves retrieval. Retrieval does not exist yet; Milestone 5
-indexes one style and can compare the other. The prefix is three short lines (path, language, line range), i.e. tens of characters; its real token
-cost needs the real tokenizer (`python -m copilot.embeddings representations` reports it).
+**Windows measurements (20 evenly spaced chunks):**
 
-## Token limits and the provisional estimator
+| Measure | Value |
+|---|---|
+| cosine(raw vector, prefixed vector): mean / min / max | 0.921 / 0.809 / 0.988 |
+| Prefix cost in real Jina tokens: median / max | 23.5 / 27 (all 294 chunks: 23.5 / 29) |
 
-The estimator behind `chunk_max_tokens` (`utils/tokens.py`) was a guess. What is known now:
+**Decision.** `prefixed` stays the default. **Its retrieval benefit is UNPROVEN.** The cosine
+figures show only that the prefix moves each vector by a modest, non-trivial amount (the closest
+pair is 0.988, the furthest 0.809); they say nothing about whether the moved vectors retrieve
+better. Retrieval does not exist yet. The prefixed and raw representations must be compared on the
+retrieval benchmark (see "Planned retrieval experiment") before the default is treated as justified.
 
-* **Truncation, not rejection.** fastembed enables truncation in its tokenizer at
-  `min(model_max_length, max_length)` from the model's `tokenizer_config.json`; over-long input is
-  **silently cut**, so a wrong estimate means silent loss of the end of a chunk, not an error.
-  (Verified from fastembed's `load_tokenizer`. The actual numeric value for the Jina model is read
-  from the model's files by `python -m copilot.embeddings tokens`; it is advertised as 8192.)
-* **fastembed exposes the tokenizer** (`TextEmbedding.model.tokenizer`, a Hugging Face `tokenizers`
-  object, already a dependency). No new dependency is needed for counting.
-  `FastEmbedEmbedder.count_tokens` clones it and switches truncation and padding off, so counts
-  are true lengths (special tokens included) and the embedding tokenizer is untouched. fastembed's
-  own `token_count()` sums *post-truncation* lengths, which is why it is not used.
-* **512 is not a Jina requirement.** It is the size of the fallback model's window (BGE-small:
-  "512 input tokens truncation"), and it was only ever our safety cap.
+## Token limits: heuristic estimate vs actual Jina tokenizer
 
-### Tokenizer-free measurements (real, reproducible)
+Two different things are called "tokens" in this project; keep them apart:
 
-`python -m copilot.embeddings sizes PATH` needs no model. Measured on this repository at commit
-`9e3586f` (`git archive 9e3586f`), line size 60, overlap 10, prefixed text:
+* **Estimated tokens** (`copilot.utils.tokens.estimate_tokens`): a dependency-free *heuristic*
+  (ASCII word runs plus every other non-space character). It drives `chunk_max_tokens` and
+  `Chunk.token_estimate`.
+* **Actual tokens**: the count produced by the real Jina tokenizer, including special tokens, via
+  `Embedder.count_tokens` (fastembed's tokenizer, cloned with truncation and padding disabled so
+  counts are true lengths; fastembed's own `token_count()` sums post-truncation lengths, so it is
+  not used).
 
-| cap (est. tokens) | chunks | non-final chunks cut short by the cap | est. median / p95 / max | embedded bytes median / p95 / max |
-|---|---|---|---|---|
-| 256 | 565 | 100.0% | 246 / 255 / 256 | 1058 / 1312 / 1646 |
-| 384 | 319 | 99.6% | 368 / 384 / 384 | 1542 / 1919 / 2262 |
-| **512 (current)** | **220** | **89.2%** | 490 / 511 / 512 | 2014 / 2386 / 2850 |
-| 768 | 168 | 46.7% | 538 / 762 / 766 | 2356 / 3314 / 3939 |
-| 1024 | 146 | 24.1% | 502 / 1010 / 1023 | 2237 / 4309 / 4948 |
-| 2048 | 136 | 2.7% | 492 / 1446 / 2045 | 2152 / 6041 / 8722 |
+fastembed truncates silently at the model limit (8192 here) instead of raising, so an inaccurate
+estimate can silently lose the end of a chunk if chunks ever approach the limit.
 
-Two conclusions that need no tokenizer:
+### Measured comparison (Windows, 294 chunks, raw content, real Jina tokenizer)
 
-1. **Safety against an 8192 limit is provable.** A WordPiece/BPE tokenizer emits at most one token
-   per byte, so `bytes + 2` bounds the token count. At the current cap the largest embedded text is
-   2850 bytes, so **no current chunk can exceed 8192 tokens**, whatever the tokenizer does
-   (`bytes-bound>limit` is 0 for caps up to 1024). This assumes the model's limit really is 8192,
-   which is fastembed's description but not yet confirmed from the model files.
-2. **The baseline is currently token-cap-driven, not line-window-driven.** With the 512 cap, 89.2%
-   of non-final chunks are shortened below 60 lines by the cap, so the "primary boundary" in
-   practice is the token estimate. At cap 1024 that falls to 24.1%.
+| Measure | Value |
+|---|---|
+| Total estimated / actual tokens | 124,190 / 142,230 (actual is 14.5% higher) |
+| Absolute error: mean / median / p95 / max | 67.2 / 54.5 / 176 / 242 tokens |
+| Mean signed error (estimated - actual) | -61.4 tokens |
+| Underestimated / overestimated / exact | 89.1% / 8.5% / 2.4% |
+| actual / estimated ratio: median / p95 / max | 1.12 / 1.41 / 1.73 |
 
-For the **fallback** BGE-small (512-token window) the byte bound proves nothing: with limit 512 the
-proof fails for 207 of 220 chunks, so a real tokenizer would be mandatory if that fallback were
-ever adopted.
+**Finding: the heuristic systematically underestimates Jina tokenization on this repository** (89.1%
+of chunks underestimated, mean error -61 tokens, real counts about 12% above the estimate at the
+median and up to 73% above). This confirms the expectation that a real code tokenizer splits
+identifiers more finely than the word-run heuristic. The finding is specific to this repository
+(mostly Python and Markdown, 294 chunks), not a general property of the estimator. The estimator
+is unchanged: `chunk_max_tokens` remains an *estimated*-token cap, and one estimated token is
+roughly 1.14 real Jina tokens here. The largest under/over-estimation examples were not part of the
+reported results and can be regenerated with `python -m copilot.embeddings tokens . --ignore-dir data`
+(metadata only: file path and line range).
 
-### Estimated vs actual (NOT YET MEASURED)
+## The 512-estimated-token cap: assessment and decision
 
-The mean/median/p95/max absolute error, percent under/over-estimated and the largest examples
-require the real tokenizer. Tooling is implemented and tested (with a synthetic tokenizer):
-`python -m copilot.embeddings tokens PATH`. Until it has been run against the real model, treat the
-estimator as unvalidated. My expectation, not a result: real tokenizers split long identifiers into
-several tokens, so the estimator probably *under*-counts code; that direction is safe here only
-because of the 8192-token headroom above.
+Windows results by candidate cap (same 60-line window and 10-line overlap; only the cap varies;
+prefixed embedding text; model limit 8192 tokens). The cap-cut column is *tokenizer-free* (Linux,
+same tree) and is the share of non-final chunks the cap shortened below 60 lines.
 
-### Assessment of the 512 cap and tuning decision
+| Estimated cap | Chunks | Cap-cut | Actual raw tokens median / p95 / max | Max embedded (prefixed) | Chunks over 8192 |
+|---|---|---|---|---|---|
+| **512 (current)** | **294** | **86.6%** | **525 / 659 / 710** | **736** | **0** |
+| 768 | 230 | 39.3% | 644 / 839 / 879 | 902 | 0 |
+| 1024 | 207 | 17.2% | 610 / 1059 / 1137 | 1160 | 0 |
+| 2048 | 196 | 1.8% | 599 / 1081 / 2150 | 2173 | 0 |
 
-* Required by the model? Not for Jina (advertised 8192); it is a self-imposed cap.
-* Unsafe? For Jina, provably no (bytes bound above). Overly conservative in tokens: probably, but
-  unmeasured.
-* Would another cap give more coherent chunks? Coherence is a retrieval-quality question and cannot
-  be settled without retrieval. What can be said is that cap 512 makes 89% of windows token-cut
-  mid-function and cap 1024 makes 24% so; whether that helps retrieval is unknown.
+Answers:
 
-**Decision: D. Defer tuning until retrieval evaluation.** No safety problem exists, so defaults
-(`chunk_size_lines=60`, `chunk_overlap_lines=10`, `chunk_max_tokens=512`) and the strategy
-version (1) are **unchanged**, and chunk ids are unchanged. Milestone 5's retrieval benchmark should
-compare at least cap 512 vs 1024 (same line size), because those two bracket the "cap-driven vs
-line-driven" regimes. The goal is retrieval quality, not filling the model's window.
+1. **Is 512 required by the model?** No. Jina's limit is 8192; 512 was only ever our own cap (and
+   the window of the BGE-small fallback, which was not used).
+2. **Is it unsafe?** No. The largest real embedded text at the current cap is 736 tokens, under 9%
+   of the limit; even at cap 2048 the largest is 2173. Zero chunks exceed the limit at any cap.
+3. **Is it overly conservative?** Only in the trivial sense that the model could take much longer
+   chunks. Whether shorter or longer chunks retrieve better is a retrieval question, not a capacity
+   question, and it is not answered by these measurements.
+4. **How many chunks approach or exceed the limit?** None approach it: the maximum is 736 of 8192
+   tokens.
+5. **Would another cap give more coherent chunks?** Unknown. At cap 512, 86.6% of non-final chunks
+   are shortened by the cap, so the token estimate, not the 60-line window, is the effective primary
+   boundary of the baseline; at 1024 that falls to 17.2%. Coherence and retrieval quality are not
+   measured here.
 
-## Measure it yourself (produces the missing numbers)
+**Decision: keep the current defaults.** `chunk_size_lines` (60), `chunk_overlap_lines` (10),
+`chunk_max_tokens` (512), the baseline strategy version (1) and all existing chunk IDs are
+unchanged. There is no safety issue against the 8192-token limit, and changing chunk size without
+retrieval evidence would be premature. The final choice must be made on retrieval quality, not on
+the model's context capacity.
+
+## Planned retrieval experiment (Milestone 5 onward)
+
+Not run yet. Record of the intended design so the decision above is revisited with evidence:
+
+* **Variable A, cap:** `chunk_max_tokens` = **512** (current), **768**, **1024** (estimated
+  tokens), at minimum. Keep `chunk_size_lines=60` and `chunk_overlap_lines=10` fixed so the cap is
+  the only chunking variable (a later sweep may vary lines and overlap). Cap 2048 is optional.
+* **Variable B, representation:** `prefixed` vs `raw`, run for each cap.
+* **Held constant:** embedding model, `top_k`, benchmark questions, and the retrieval method.
+* **Metrics:** Hit@k and MRR against expected files/symbols (Milestone 5 benchmark), plus chunk
+  count, index size and embedding time as costs.
+* **Matching:** chunk IDs change with `chunk_max_tokens` (it is part of the ID contract), so
+  expected results must be matched by file path and line-range overlap, never by chunk ID.
+* **Reporting:** raw numbers only, no significance claims unless a test is actually run; a benchmark
+  of tens of questions cannot separate small differences.
+* **Possible outcome:** if a different cap wins, change the default in a separate commit; the ID
+  contract already includes the cap, and a change to the estimator itself (rather than the cap)
+  would additionally require bumping the strategy version.
+
+## Measure it yourself
 
 ```powershell
 uv run python -m copilot.embeddings info
+uv run python -m copilot.embeddings sizes . --ignore-dir data         # no model, no download
 uv run python -m copilot.embeddings smoke . --ignore-dir data -n 8
 uv run python -m copilot.embeddings tokens . --ignore-dir data
 uv run python -m copilot.embeddings representations . --ignore-dir data -n 20
@@ -229,7 +259,8 @@ $env:COPILOT_RUN_LIVE = "1"; uv run pytest tests/integration/test_real_model_liv
 ```
 
 The first model-loading command downloads ~0.64 GB into `data/cache/models`. Output contains
-metadata only: never vectors or source text.
+metadata only: never vectors or source text. Results depend on the repository tree; the figures
+above are for commit `163bd34`.
 
 ## Tests
 
@@ -238,10 +269,9 @@ metadata only: never vectors or source text.
 * `tests/integration/test_fastembed_runtime_stub.py` runs the **real** fastembed, onnxruntime and
   tokenizers stack on a tiny *synthetic* 768-dimensional ONNX model (built by
   `tests/fixtures/stub_onnx_model.py`, needs the dev-only `onnx` package). It validates our adapter
-  and fastembed's pooling/normalisation/truncation behaviour; it is not the Jina model and says
-  nothing about quality.
+  and fastembed's pooling/normalisation/truncation behaviour, offline.
 * `tests/integration/test_real_model_live.py` needs the real model and is skipped unless
-  `COPILOT_RUN_LIVE=1`.
+  `COPILOT_RUN_LIVE=1`; it passed on Windows (3 of 3).
 
 ## Security
 
@@ -252,13 +282,17 @@ change that.
 
 ## Known limitations
 
-* The real model, real tokenizer counts and the estimated-vs-actual comparison are unmeasured (see
-  above); `info.max_input_tokens` and `runtime_limits()` will report the true values on first run.
+* Findings come from one repository (mostly Python and Markdown, 294 chunks) and one Windows
+  machine; other repositories or languages may show different estimator error.
+* The heuristic estimator underestimates real tokens by about 14.5% in total here; it is left as is
+  (see decision) and its cap should be read as "estimated".
+* Throughput and memory are essentially unmeasured (one 8-text run; no memory figure); batch size
+  and threads are untuned.
+* Whether the metadata prefix helps retrieval, and which cap retrieves best, are open questions for
+  the retrieval experiment.
 * `count_tokens` and `runtime_limits` use fastembed internals (`model.model.tokenizer`,
   `_model_dir`); a fastembed upgrade could break them, which is why fastembed is pinned to
   `>=0.8,<0.9` and failures raise a clear error.
-* Silent truncation applies to any text over the model limit; the pipeline relies on the chunk cap
-  to avoid it.
-* Batch size, threads and speed are untuned; the Jina model is CPU-heavy (0.64 GB).
-* Windows behaviour is unverified until you run the commands above.
+* Silent truncation applies to any text over the model limit; no current chunk comes near it.
 * Symmetric model only; `asymmetric=True` handling exists in the interface but is untested.
+* The Hugging Face symlink warning on Windows is cosmetic (see above).
