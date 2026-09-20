@@ -4,8 +4,9 @@ An academic project: a repository-aware AI assistant that answers questions abou
 using evidence retrieved from that codebase, and cites the files, functions and line ranges
 it used.
 
-> **Status: Milestone 1 (project foundation) only.** The RAG pipeline, embeddings, retrieval,
-> agents and UI described below are **planned and do not exist yet.** See
+> **Status: Milestone 2 (safe repository ingestion).** Only the foundation and repository
+> ingestion exist. Chunking, embeddings, retrieval, the RAG pipeline, agents and the UI described
+> below are **planned and do not exist yet.** See
 > [Current implementation status](#current-implementation-status).
 
 ## Academic context
@@ -75,11 +76,14 @@ agentic-rag-code-copilot/
 ├── .env.example            # variable names and placeholders only (never real secrets)
 ├── src/copilot/
 │   ├── config/             # IMPLEMENTED: settings.py, logging_setup.py
-│   ├── models/ ingestion/ parsing/ chunking/ embeddings/ vectorstore/
-│   ├── retrieval/ llm/ rag/ agents/ evaluation/ services/ utils/
+│   ├── ingestion/          # IMPLEMENTED: policy, discovery, reader, loader, CLI
+│   ├── models/             # IMPLEMENTED: ingestion models (SourceFile, IngestionResult, ...)
+│   ├── utils/              # IMPLEMENTED: safe path helpers
+│   ├── parsing/ chunking/ embeddings/ vectorstore/ retrieval/ llm/ rag/ agents/
+│   │   evaluation/ services/
 │   │                       # PLANNED: currently docstring-only packages
-├── tests/                  # unit/ integration/ security/ (unit tests exist for the foundation)
-├── docs/                   # ARCHITECTURE_PLAN.md
+├── tests/                  # unit/ integration/ security/ + fixtures/ (synthetic repository builder)
+├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md
 └── data/                   # local runtime data; contents are git-ignored
 ```
 
@@ -88,17 +92,22 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
 
 ## Current implementation status
 
-**Implemented now (Milestone 1: foundation only)**
+**Implemented now (Milestones 1-2)**
 
 - Project packaging and dependency configuration (`pyproject.toml`).
 - Typed configuration with validation and safe defaults (`copilot.config.Settings`).
 - Logging setup that masks known secret values (`copilot.config.setup_logging`).
 - `.gitignore` protecting secrets, environments, caches, indexes and runtime data.
-- Unit tests for the package, configuration, logging and ignore rules.
+- **Safe repository ingestion** (`copilot.ingestion.ingest_repository`): prunes ignored and
+  sensitive directories during traversal, rejects sensitive, binary, oversized, unsupported and
+  undecodable files, never follows symlinks, enforces file-count/size limits, and returns typed
+  `SourceFile` objects plus statistics. Supported types: `.py .js .jsx .ts .tsx .java .c .cpp .md
+  .json .yaml .yml`. Details, policies and limitations: [`docs/ingestion.md`](docs/ingestion.md).
+- Unit, integration and security tests for the above (run against a synthetic repository).
 
 **Planned (not implemented; do not expect these to work)**
 
-Safe repository ingestion, chunking, embeddings, vector search, RAG answers, citations,
+Chunking, embeddings, vector search, RAG answers, citations,
 Streamlit UI, LangGraph workflow, structure-aware chunking, debugging assistance, evaluation.
 
 ## Setup (current milestone)
@@ -111,11 +120,19 @@ cd agentic-rag-code-copilot
 uv sync                      # creates .venv with Python 3.12 and installs dependencies
 ```
 
-Optional configuration (nothing needs a key yet; the LLM model ID is intentionally unset until Milestone 6):
+Optional configuration (nothing needs a key yet; the LLM model ID is intentionally unset until
+Milestone 6):
 
 ```bash
 cp .env.example .env         # Windows PowerShell: Copy-Item .env.example .env
 # edit .env; it is git-ignored and must never be committed
+```
+
+Inspect what ingestion would accept from any local repository (prints statistics and relative
+paths only, never file contents):
+
+```bash
+uv run python -m copilot.ingestion path/to/repo --skipped
 ```
 
 Run the checks:
@@ -135,9 +152,10 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | Milestone | Topic | Status |
 |---|---|---|
 | 0 | Architecture and planning | Done |
-| 1 | Project foundation | **Done (this commit)** |
-| 2 | Safe repository ingestion | Next |
-| 3-7 | Chunking, embeddings, retrieval, basic RAG, Streamlit MVP | Planned |
+| 1 | Project foundation | Done |
+| 2 | Safe repository ingestion | **Done (this commit)** |
+| 3 | Baseline chunking | Next |
+| 4-7 | Embeddings, retrieval, basic RAG, Streamlit MVP | Planned |
 | 8-11 | LangGraph, structure-aware chunking, two experiments | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |
 
@@ -146,7 +164,10 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 - Secrets come only from environment variables or a local `.env` file. `.env` is git-ignored;
   `.env.example` contains placeholders only.
 - Never commit API keys, tokens, private keys or credentials. Logging masks known secret values.
-- Ingestion will skip secrets, binaries, oversized files and unsafe paths (Milestone 2, planned).
+- Ingestion skips sensitive file *names* (`.env*`, keys, credential files), binaries, oversized
+  files and unsafe paths, and never follows symlinks. It does **not yet scan file contents** for
+  secrets, so a source file with a hard-coded key would still be ingested (planned before any
+  text is sent to an LLM).
 - When the LLM is used, retrieved repository text is sent to an external API. Only index public
   or your own repositories when using a hosted provider.
 - The project never executes code from an indexed repository.
