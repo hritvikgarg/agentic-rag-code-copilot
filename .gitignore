@@ -1,0 +1,49 @@
+# --- Secrets and credentials (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials*.json
+service-account*.json
+.npmrc
+.pypirc
+
+# --- Python environments and caches ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Local runtime data (indexes, cloned/uploaded repositories, caches) ---
+# Anchored to the repository root so src/copilot/models/ etc. are NOT ignored.
+/data/*
+!/data/.gitkeep
+*.faiss
+*.index
+.fastembed_cache/
+/models/
+
+# --- Evaluation: raw run output is local; curated final results are committed ---
+/results/runs/
+
+# --- Logs, IDE and OS files ---
+*.log
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

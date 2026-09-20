@@ -1,0 +1,3 @@
+# Normalise line endings so Windows and Linux checkouts produce identical file contents
+# (line numbers are part of every citation, so this matters for this project).
+* text=auto eol=lf
