@@ -4,10 +4,10 @@ An academic project: a repository-aware AI assistant that answers questions abou
 using evidence retrieved from that codebase, and cites the files, functions and line ranges
 it used.
 
-> **Status: Milestone 5 (persistent FAISS vector index).** Only the foundation, repository
-> ingestion, baseline chunking, a local embedding service and a persistent vector index exist.
-> Semantic retrieval, the RAG pipeline, agents and the UI described below are **planned and do
-> not exist yet.** See
+> **Status: Milestone 5b (semantic retrieval and retrieval evaluation).** The foundation,
+> repository ingestion, baseline chunking, a local embedding service, a persistent vector index,
+> semantic retrieval (no LLM) and a retrieval benchmark harness exist. The RAG pipeline, LLM
+> answers, agents and the UI described below are **planned and do not exist yet.** See
 > [Current implementation status](#current-implementation-status).
 
 ## Academic context
@@ -62,7 +62,9 @@ The full design, technology decisions, milestones and evaluation plan are in
 | Logging | Standard library `logging` with secret redaction | **Implemented now** |
 | Testing / lint | `pytest`, `pytest-cov`, `ruff` | **Implemented now** |
 | Embeddings | `fastembed` (ONNX), `jina-embeddings-v2-base-code`, fallback `bge-small-en-v1.5` (unused) | **Implemented and validated on Windows (Milestone 4)** |
-| Vector index | FAISS `IndexFlatIP` (exact) + JSONL sidecar + manifest, atomic save | **Implemented (Milestone 5; tested with fake embeddings, real-model run pending on Windows)** |
+| Vector index | FAISS `IndexFlatIP` (exact) + JSONL sidecar + manifest, atomic save | **Implemented and validated on Windows with the real model (Milestone 5a)** |
+| Semantic retrieval | Query embedding -> exact FAISS search -> verified source text (no LLM) | **Implemented (Milestone 5b)** |
+| Retrieval evaluation | Hit@k, MRR, mean lines per hit; JSONL benchmark; cap x representation matrix | **Implemented (Milestone 5b); benchmark is not independent** |
 | LLM | Gemini via `google-genai`; Ollama optional fallback | Planned (Milestone 6) |
 | Interface | Streamlit | Planned (Milestone 7) |
 | Orchestration | LangGraph | Planned (Milestone 8) |
@@ -96,7 +98,7 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
 
 ## Current implementation status
 
-**Implemented now (Milestones 1-5)**
+**Implemented now (Milestones 1-5b)**
 
 - Project packaging and dependency configuration (`pyproject.toml`).
 - Typed configuration with validation and safe defaults (`copilot.config.Settings`).
@@ -131,14 +133,27 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   compatibility-critical setting and artifact checksums, strict loading that **refuses**
   incompatible, stale or corrupt indexes, and atomic saves. CLI: `python -m copilot.vectorstore
   {build,info,validate}` (`info` and `validate` do not load the model). This is indexing and
-  persistence only: **there is no semantic search or ranking API yet.** Details, contracts and
+  persistence, plus the exact `VectorIndex.search` primitive. Details, contracts and
   limitations: [`docs/vector-index.md`](docs/vector-index.md).
+- **Semantic retrieval** (`copilot.retrieval`, Milestone 5b): `retrieve(query, top_k, repo_path,
+  index)` embeds the query locally with the index's model, runs exact FAISS search (deterministic tie
+  order, FAISS `-1` padding filtered), re-materialises each chunk's source text from the repository
+  and verifies it against the index (stale repositories are refused), and returns typed
+  `RetrievalResult` objects with score, file, line range and text. **No LLM is involved and it
+  returns chunks, not answers.** CLI: `python -m copilot.retrieval search INDEX_DIR --repo PATH
+  "query"`. Details: [`docs/retrieval.md`](docs/retrieval.md).
+- **Retrieval evaluation** (`copilot.evaluation`): a transparent JSONL benchmark format (questions
+  with hand-verified source regions, pinned by text hashes), Hit@1/3/5/10, MRR and mean lines per
+  hit, and a runner for the chunk-cap x representation matrix. The included benchmark covers this
+  repository at a pinned commit and is **not independent** (same author wrote code and questions).
+  Measured results and their limits: [`docs/evaluation.md`](docs/evaluation.md).
 - Unit, integration and security tests for the above (run against synthetic repositories).
 
 **Planned (not implemented; do not expect these to work)**
 
-Semantic retrieval and its benchmark, RAG answers, citations,
-Streamlit UI, LangGraph workflow, structure-aware chunking, debugging assistance, evaluation.
+RAG answers, citations in generated answers, lexical/hybrid retrieval, Streamlit UI, LangGraph
+workflow, structure-aware chunking, debugging assistance, the plain-LLM comparison, and an
+evaluation on an independent repository.
 
 ## Setup (current milestone)
 
@@ -190,6 +205,14 @@ uv run python -m copilot.vectorstore info data/indexes/<index-id>
 uv run python -m copilot.vectorstore validate data/indexes/<index-id> --repo path/to/repo --ignore-dir data
 ```
 
+Search a built index (loads the embedding model; use the same `--ignore-dir` values as when
+building) and run the retrieval benchmark:
+
+```bash
+uv run python -m copilot.retrieval search data/indexes/<index-id> --repo path/to/repo --ignore-dir data "How is logging configured?"
+uv run python -m copilot.evaluation verify benchmarks/copilot_self_055a8d5.jsonl --repo <export of commit 055a8d5>
+```
+
 Run the checks:
 
 ```bash
@@ -211,7 +234,9 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | 2 | Safe repository ingestion | Done |
 | 3 | Baseline chunking | Done |
 | 4 | Embedding service and tokenizer validation | **Done (validated on Windows)** |
-| 5-7 | Vector store and retrieval, basic RAG, Streamlit MVP | Planned |
+| 5a | FAISS vector index | **Done (validated on Windows)** |
+| 5b | Semantic retrieval and retrieval evaluation | **Done (real-model measurements in `docs/evaluation.md`)** |
+| 6-7 | Basic RAG, Streamlit MVP | Planned |
 | 8-11 | LangGraph, structure-aware chunking, two experiments | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |
 

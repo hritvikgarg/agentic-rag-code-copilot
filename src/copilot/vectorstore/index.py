@@ -39,6 +39,7 @@ from copilot.vectorstore.errors import (
     IndexBuildError,
     IndexCompatibilityError,
     IndexCorruptError,
+    SearchInputError,
 )
 from copilot.vectorstore.manifest import (
     CHUNKS_FILE,
@@ -72,6 +73,17 @@ def _artifact_info(data: bytes) -> ArtifactInfo:
 def _manifest_bytes(manifest: IndexManifest) -> bytes:
     text = json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True, ensure_ascii=True)
     return (text + "\n").encode("utf-8")
+
+
+@dataclass(frozen=True)
+class SearchHit:
+    """One search result: the vector's position in the index and its similarity to the query.
+
+    ``score`` is the inner product of two unit vectors, i.e. the cosine similarity in ``[-1, 1]``.
+    """
+
+    position: int
+    score: float
 
 
 @dataclass(frozen=True)
@@ -357,10 +369,73 @@ class VectorIndex:
             min_self_score=min_score,
         )
 
-    def _search_positions(self, queries: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
-        """Raw ``(scores, positions)`` for already-embedded ``queries``.
+    def search(self, query_vector: np.ndarray, top_k: int) -> list[SearchHit]:
+        """The ``top_k`` stored vectors most similar to ``query_vector``, best first.
 
-        Internal primitive for serialisation tests; it is not a retrieval API (no query embedding,
-        no chunk lookup, no thresholding).
+        * ``query_vector`` must be a 1-D float array of this index's dimension, finite and of unit
+          length (the same guarantee the embedding layer gives). Anything else raises
+          ``SearchInputError``: a wrong-model or un-normalised query would silently give wrong
+          "cosine" scores.
+        * ``top_k`` must be an ``int >= 1``. It may exceed the index size: you then get every vector
+          (fewer than ``top_k`` results). FAISS pads missing results with position ``-1``; those
+          pads are dropped here and are never mapped to a chunk.
+        * **Deterministic order:** results are sorted by score descending, then by ascending
+          position. Exact ties (equal ``float32`` scores, e.g. identical chunk text) are therefore
+          always ordered the same way, and a tie at the ``top_k`` boundary is resolved in favour of
+          the lower position: the search is widened until the boundary is unambiguous.
+        """
+        query = self._validated_query(query_vector)
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 1:
+            raise SearchInputError(f"top_k must be an integer >= 1, got {top_k!r}")
+        count = self.count
+        if count == 0:
+            return []
+        wanted = min(top_k, count)
+        fetch = min(count, wanted + 1)  # one extra result reveals a tie at the boundary
+        while True:
+            scores, positions = backend.search(self._faiss, query[np.newaxis, :], fetch)
+            pairs = [
+                (int(p), float(s)) for p, s in zip(positions[0], scores[0], strict=True) if p >= 0
+            ]
+            if fetch >= count or len(pairs) < fetch:
+                break
+            if pairs[fetch - 1][1] < pairs[wanted - 1][1]:  # the last fetched is strictly worse
+                break
+            fetch = min(count, fetch * 2)
+        pairs.sort(key=lambda pair: (-pair[1], pair[0]))
+        return [SearchHit(position=p, score=s) for p, s in pairs[:wanted]]
+
+    def _validated_query(self, query_vector: object) -> np.ndarray:
+        if not isinstance(query_vector, np.ndarray):
+            raise SearchInputError(
+                f"query vector must be a numpy array, got {type(query_vector).__name__}"
+            )
+        if query_vector.dtype.kind != "f":
+            raise SearchInputError(f"query vector must be floating point, got {query_vector.dtype}")
+        if query_vector.ndim != 1:
+            raise SearchInputError(
+                f"query vector must be 1-D (dimension,), got shape {query_vector.shape}"
+            )
+        if query_vector.shape[0] != self.dimension:
+            raise SearchInputError(
+                f"query dimension {query_vector.shape[0]} does not match the index "
+                f"({self.dimension})"
+            )
+        query = np.ascontiguousarray(query_vector, dtype=np.float32)
+        if not np.isfinite(query).all():
+            raise SearchInputError("query vector contains NaN or infinite values")
+        deviation = abs(float(np.linalg.norm(query)) - 1.0)
+        if deviation > NORM_TOLERANCE:
+            raise SearchInputError(
+                f"query vector is not unit length (|norm - 1| = {deviation:.3g}); "
+                "cosine similarity would be wrong"
+            )
+        return query
+
+    def _search_positions(self, queries: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+        """Raw ``(scores, positions)`` for already-embedded ``queries`` (serialisation tests).
+
+        Low-level primitive kept for the persistence tests: no validation, no ``-1`` filtering, no
+        tie-breaking. Use :meth:`search`.
         """
         return backend.search(self._faiss, queries, k)

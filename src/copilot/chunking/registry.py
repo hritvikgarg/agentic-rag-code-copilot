@@ -8,10 +8,14 @@ two-strategy experiment.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from copilot.chunking.base import Chunker
-from copilot.chunking.errors import StrategyNotImplementedError, UnknownChunkingStrategyError
+from copilot.chunking.errors import (
+    ChunkingError,
+    StrategyNotImplementedError,
+    UnknownChunkingStrategyError,
+)
 from copilot.chunking.line_chunker import LineChunker
 from copilot.config.settings import Settings, get_settings
 
@@ -47,3 +51,39 @@ def create_chunker(name: str | None = None, *, settings: Settings | None = None)
     raise UnknownChunkingStrategyError(
         f"unknown chunking strategy {strategy!r}; available: {', '.join(available_strategies())}"
     )
+
+
+def create_chunker_from_params(name: str, version: int, params: Mapping[str, int | str]) -> Chunker:
+    """Recreate the chunker an *existing index* was built with (from its manifest).
+
+    ``create_chunker`` reads the current ``Settings``; retrieval must instead reproduce the exact
+    chunking recorded in the index, whatever the settings are now. Raises ``ChunkingError`` if a
+    parameter is missing or the strategy's algorithm version differs from the recorded one (the
+    chunk ids would then differ), and the usual unknown/not-implemented errors for the name.
+    """
+    if name == "line":
+        try:
+            chunker: Chunker = LineChunker(
+                size_lines=int(params["size_lines"]),
+                overlap_lines=int(params["overlap_lines"]),
+                max_tokens=int(params["max_tokens"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ChunkingError(
+                f"invalid chunking parameters for {name!r}: {dict(params)}"
+            ) from exc
+    elif name in _RESERVED:
+        raise StrategyNotImplementedError(
+            f"chunking strategy {name!r} is reserved for {_RESERVED[name]} and is not "
+            "implemented yet"
+        )
+    else:
+        raise UnknownChunkingStrategyError(
+            f"unknown chunking strategy {name!r}; available: {', '.join(available_strategies())}"
+        )
+    if chunker.version != version:
+        raise ChunkingError(
+            f"the index was built with {name!r} chunker version {version}, this code has "
+            f"version {chunker.version}: chunk ids would differ; rebuild the index"
+        )
+    return chunker

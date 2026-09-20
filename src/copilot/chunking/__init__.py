@@ -7,7 +7,11 @@ from copilot.chunking.errors import (
     UnknownChunkingStrategyError,
 )
 from copilot.chunking.line_chunker import LineChunker
-from copilot.chunking.registry import available_strategies, create_chunker
+from copilot.chunking.registry import (
+    available_strategies,
+    create_chunker,
+    create_chunker_from_params,
+)
 
 __all__ = [
     "ChunkingError",
@@ -18,4 +22,5 @@ __all__ = [
     "available_strategies",
     "chunk_repository",
     "create_chunker",
+    "create_chunker_from_params",
 ]

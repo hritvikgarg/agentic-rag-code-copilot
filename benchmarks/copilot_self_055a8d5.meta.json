@@ -1,0 +1,20 @@
+{
+  "schema_version": "retrieval-benchmark/1",
+  "name": "copilot-self-055a8d5",
+  "repository_name": "agentic-rag-code-copilot",
+  "commit": "055a8d5",
+  "ignore_directories": [
+    "data",
+    "tests",
+    "submission"
+  ],
+  "independent": false,
+  "description": "Questions about this project's own source code and docs at commit 055a8d5, written by the project author (who also designed the retrieval system). Ground-truth regions were read and chosen manually.",
+  "limitations": [
+    "Not independent: the author wrote both the code under test and the questions, so results are optimistic and cannot show generalisation.",
+    "Small (34 questions); differences of a few questions are within noise and no significance test is made.",
+    "The tests/ and submission/ directories are excluded from the index, which removes many plausible distractors.",
+    "Ground-truth regions are function-sized; larger chunks overlap them more easily (chunk-size confound).",
+    "Several questions use words that also appear in identifiers or docs, so lexical overlap helps the embedding model."
+  ]
+}

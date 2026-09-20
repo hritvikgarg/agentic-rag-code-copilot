@@ -1,8 +1,9 @@
 """Persistent exact vector index (FAISS ``IndexFlatIP``) with a verified chunk mapping.
 
-Milestone 5: building, saving, loading and validating an index. There is deliberately **no**
-retrieval/ranking API here yet (semantic retrieval is the next milestone). Nothing outside this
-package imports FAISS.
+Milestone 5a: building, saving, loading and validating an index. Milestone 5b adds
+``VectorIndex.search`` (query vector -> ``SearchHit`` positions and scores); turning positions into
+chunks and source text is the job of ``copilot.retrieval``. Nothing outside this package imports
+FAISS.
 """
 
 from copilot.vectorstore.builder import (
@@ -17,10 +18,11 @@ from copilot.vectorstore.errors import (
     IndexCorruptError,
     IndexExistsError,
     IndexStorageError,
+    SearchInputError,
     VectorStoreError,
 )
 from copilot.vectorstore.fingerprint import repository_fingerprint
-from copilot.vectorstore.index import VectorCheck, VectorIndex
+from copilot.vectorstore.index import SearchHit, VectorCheck, VectorIndex
 from copilot.vectorstore.manifest import (
     INDEX_ID_SCHEMA,
     INDEX_TYPE,
@@ -50,6 +52,8 @@ __all__ = [
     "IndexSpec",
     "IndexStorageError",
     "Mismatch",
+    "SearchHit",
+    "SearchInputError",
     "VectorCheck",
     "VectorIndex",
     "VectorStoreError",

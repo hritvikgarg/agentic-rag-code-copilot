@@ -246,8 +246,13 @@ Rules that apply to every milestone: implement only that milestone; run its test
 - **KEY FILES:** `vectorstore/{index,manifest,records,fingerprint,validation,atomic,faiss_backend,builder,errors,__main__}.py`; contracts in `docs/vector-index.md`.
 - **DEVIATION FROM THE ORIGINAL SKETCH (recorded, see amendment 14):** index directories are named by the deterministic `index_id`, not `<repo>__<strategy>__<embed>`; the `Embedder`/`VectorStore` protocol pair was reduced to one concrete `VectorIndex` behind a single FAISS module, since there is one backend and no second implementation to justify a protocol.
 
-### Milestone 5 (original numbering) — Semantic retrieval + benchmark v0
-- **STATUS:** Not started; follows the vector-index milestone above as the next task. Later milestone numbers are not renumbered here; the LLM gate (amendment 10) is attached to "the first external-LLM call", whatever its number.
+### Milestone 5b — Semantic Retrieval & Evaluation (as delivered)
+- **STATUS:** Implemented and tested. Real-model measurements are in `docs/evaluation.md`. Delivered: `VectorIndex.search` (deterministic ordering, FAISS `-1` filtering), `copilot.retrieval` (`Retriever`, `retrieve`, `RetrievalResult`, source re-materialisation with fingerprint and per-chunk hash verification, CLI), `copilot.evaluation` (JSONL benchmark with hash-pinned regions, Hit@k/MRR/mean-lines-per-hit, cap x representation matrix runner, CLI). Design in `docs/retrieval.md` and `docs/evaluation.md`.
+- **DEVIATIONS (recorded):** the index stores metadata only, so source text is re-materialised at search time and verified by hash; the benchmark is this repository at a pinned commit and is explicitly **not independent**; benchmark ground truth is file + line regions, never chunk ids. **Deferred, not implemented:** `LexicalRetriever` (BM25), `HybridRetriever` (RRF), language/path filters, an independent benchmark repository.
+- **NEXT:** Milestone 6 (RAG) may start only after the content-based secret scanner gate (amendment 10).
+
+### Milestone 5 (original numbering) — Semantic retrieval + benchmark v0 (partly superseded by 5b above)
+- **STATUS:** Semantic part delivered as Milestone 5b; the lexical and hybrid retrievers below remain not started. Later milestone numbers are not renumbered here; the LLM gate (amendment 10) is attached to "the first external-LLM call", whatever its number.
 - **OBJECTIVE:** Retrieval that is independently measurable before any LLM exists.
 - **WHAT WILL BE BUILT:** `SemanticRetriever` (top-k, scores, optional language/path-prefix filter); `LexicalRetriever` (BM25, code-aware tokenizer); `HybridRetriever` (reciprocal-rank fusion); `RetrievedChunk`; benchmark file format (`question, category, expected_files, expected_symbols, answerable`); pinned benchmark repos (`benchmarks/repos.yaml` with commit SHAs); first 15–20 hand-written questions; retrieval evaluation harness computing Hit@1/3/5 and MRR.
 - **KEY FILES:** `retrieval/{semantic,lexical,hybrid}.py`, `evaluation/{benchmark,metrics}.py`, `benchmarks/questions/*.yaml`, `scripts/run_eval.py`.

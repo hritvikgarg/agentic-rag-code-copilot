@@ -19,6 +19,10 @@ class EmptyIndexError(IndexBuildError):
     """There is nothing to index (no accepted files, zero chunks or zero vectors)."""
 
 
+class SearchInputError(VectorStoreError, ValueError):
+    """A search request is malformed (query-vector shape/dtype/norm/finiteness, or ``top_k``)."""
+
+
 class IndexStorageError(VectorStoreError):
     """Writing the index failed (I/O error, invalid target)."""
 
