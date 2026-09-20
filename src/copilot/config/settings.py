@@ -41,8 +41,9 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     llm_provider: LLMProvider = "gemini"
-    # Provisional default; verify against current Gemini docs and your quota before Milestone 6.
-    llm_model: str = "gemini-3.8-flash"
+    # Deliberately unset: the concrete model ID is chosen and verified in Milestone 6 (against the
+    # provider's current docs and the account's quota). No unverified ID is stored as a default.
+    llm_model: str | None = Field(default=None, min_length=1)
     ollama_base_url: str = "http://localhost:11434"
     gemini_api_key: SecretStr | None = Field(
         default=None,

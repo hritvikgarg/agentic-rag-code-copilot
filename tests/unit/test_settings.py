@@ -26,6 +26,14 @@ def test_defaults_are_sensible():
     assert s.gemini_api_key is None
 
 
+def test_llm_model_is_unset_by_default_and_validated():
+    """No unverified model ID is shipped as a default; it is chosen in Milestone 6."""
+    assert make().llm_model is None
+    assert make(llm_model="some-model-id").llm_model == "some-model-id"
+    with pytest.raises(ValidationError):
+        make(llm_model="")
+
+
 def test_environment_overrides(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("COPILOT_RETRIEVAL_TOP_K", "9")
     monkeypatch.setenv("COPILOT_CHUNKING_STRATEGY", "ast")
