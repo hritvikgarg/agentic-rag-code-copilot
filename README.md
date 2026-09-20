@@ -4,9 +4,10 @@ An academic project: a repository-aware AI assistant that answers questions abou
 using evidence retrieved from that codebase, and cites the files, functions and line ranges
 it used.
 
-> **Status: Milestone 5b (semantic retrieval and retrieval evaluation).** The foundation,
+> **Status: Milestone 5c (content-secret scanner and external-LLM gate).** The foundation,
 > repository ingestion, baseline chunking, a local embedding service, a persistent vector index,
-> semantic retrieval (no LLM) and a retrieval benchmark harness exist. The RAG pipeline, LLM
+> semantic retrieval (no LLM), a retrieval benchmark harness and a content-based secret scanner
+> with a fail-closed gate exist. The RAG pipeline, LLM
 > answers, agents and the UI described below are **planned and do not exist yet.** See
 > [Current implementation status](#current-implementation-status).
 
@@ -65,6 +66,7 @@ The full design, technology decisions, milestones and evaluation plan are in
 | Vector index | FAISS `IndexFlatIP` (exact) + JSONL sidecar + manifest, atomic save | **Implemented and validated on Windows with the real model (Milestone 5a)** |
 | Semantic retrieval | Query embedding -> exact FAISS search -> verified source text (no LLM) | **Implemented (Milestone 5b)** |
 | Retrieval evaluation | Hit@k, MRR, mean lines per hit; JSONL benchmark; cap x representation matrix | **Implemented (Milestone 5b); benchmark is not independent** |
+| Secret scanner | Content scan (private keys, provider tokens, secret-like assignments) + fail-closed gate | **Implemented (Milestone 5c); not yet wired: no LLM path exists** |
 | LLM | Gemini via `google-genai`; Ollama optional fallback | Planned (Milestone 6) |
 | Interface | Streamlit | Planned (Milestone 7) |
 | Orchestration | LangGraph | Planned (Milestone 8) |
@@ -98,7 +100,7 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
 
 ## Current implementation status
 
-**Implemented now (Milestones 1-5b)**
+**Implemented now (Milestones 1-5c)**
 
 - Project packaging and dependency configuration (`pyproject.toml`).
 - Typed configuration with validation and safe defaults (`copilot.config.Settings`).
@@ -151,6 +153,17 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   default; `raw` had higher Hit@10 (85.3% vs 82.4%). Larger chunks have a line-overlap advantage,
   the differences are one to three questions of 34, and no significance or generalisation is
   claimed. Full table and limits: [`docs/evaluation.md`](docs/evaluation.md).
+- **Content-secret scanner and external-LLM gate** (`copilot.security`, Milestone 5c): scans the
+  *content* of repository text for private keys, provider token formats (GitHub, AWS, Google, Slack,
+  Stripe, GitLab, Hugging Face, `sk-` keys...), bearer values, URL credentials and non-trivial literals
+  assigned to secret-like names, with placeholder/environment-lookup/hash/UUID false-positive handling.
+  Findings carry only safe metadata (rule, relative path, line, column, masked preview); the value is
+  never stored, logged or raised. `assert_safe_for_external_llm(...)` raises
+  `RepositorySecretRiskError` on any finding and has **no bypass**. CLI: `python -m copilot.security
+  scan PATH` (exit 0 clean, 1 findings, 2 error/incomplete). **No external LLM exists yet, so the gate
+  is not wired into any LLM call; Milestone 6 must call it before sending repository text.** It reduces
+  risk but cannot guarantee that every secret is found. Details, rules and limitations:
+  [`docs/security.md`](docs/security.md).
 - Unit, integration and security tests for the above (run against synthetic repositories).
 
 **Planned (not implemented; do not expect these to work)**
@@ -217,6 +230,12 @@ uv run python -m copilot.retrieval search data/indexes/<index-id> --repo path/to
 uv run python -m copilot.evaluation verify benchmarks/copilot_self_055a8d5.jsonl --repo <export of commit 055a8d5>
 ```
 
+Scan a repository's content for secrets (uses the safe ingestion; exit status 1 if found):
+
+```bash
+uv run python -m copilot.security scan path/to/repo --ignore-dir data
+```
+
 Run the checks:
 
 ```bash
@@ -240,6 +259,7 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | 4 | Embedding service and tokenizer validation | **Done (validated on Windows)** |
 | 5a | FAISS vector index | **Done (validated on Windows)** |
 | 5b | Semantic retrieval and retrieval evaluation | **Done (matrix run on Windows; results in `docs/evaluation.md`)** |
+| 5c | Content-secret scanner and external-LLM gate | **Done (gate not yet wired: no LLM path)** |
 | 6-7 | Basic RAG, Streamlit MVP | Planned |
 | 8-11 | LangGraph, structure-aware chunking, two experiments | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |
@@ -250,10 +270,11 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
   `.env.example` contains placeholders only.
 - Never commit API keys, tokens, private keys or credentials. Logging masks known secret values.
 - Ingestion skips sensitive file *names* (`.env*`, keys, credential files), binaries, oversized
-  files and unsafe paths, and never follows symlinks. It does **not yet scan file contents** for
-  secrets, so a source file with a hard-coded key would still be ingested. A content-based
-  secret scanner is a **mandatory task before any repository context is sent to an external LLM
-  (Milestone 6 gate)**.
+  files and unsafe paths, and never follows symlinks. Filename filtering alone cannot see a key
+  pasted into an ordinary source file, so a **content scanner** (`copilot.security`, Milestone 5c)
+  inspects file text, and its fail-closed gate `assert_safe_for_external_llm` **must be called before
+  any repository context is sent to an external LLM (Milestone 6)**. It is not wired into an LLM path
+  yet because none exists, and it cannot guarantee that every secret is found.
 - When the LLM is used, retrieved repository text is sent to an external API. Only index public
   or your own repositories when using a hosted provider.
 - The project never executes code from an indexed repository.

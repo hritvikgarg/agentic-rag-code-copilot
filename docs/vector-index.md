@@ -257,8 +257,8 @@ Details: `docs/embeddings.md`. The experiment was executed in Milestone 5b; its 
 * FAISS deserialisation is not hardened against maliciously crafted files, and the SHA-256 checks catch
   accidental damage rather than an attacker who can edit both a file and the manifest. Load only indexes
   this application built.
-* The mandatory content-based secret scanner remains a hard gate before any repository context is sent
-  to an external LLM.
+* The mandatory content-based secret scanner (`copilot.security`, `docs/security.md`) is a hard gate
+  before any repository context is sent to an external LLM; Milestone 6 must call it.
 
 ## 15. Limitations
 

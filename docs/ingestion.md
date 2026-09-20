@@ -146,11 +146,11 @@ environment variables are never logged.
 
 ## Known limitations
 
-* **No content scanning.** Files are judged by name only. A `.py` file with a hard-coded API key is
-  ingested. Because retrieved code will later be sent to an external LLM, a lightweight content
-  scan is a **mandatory security task that must be completed before any repository context is sent
-  to an external LLM in Milestone 6** (deliberately deferred; ingestion scope is not otherwise
-  expanded).
+* **No content scanning inside ingestion.** Files are judged by name only. A `.py` file with a
+  hard-coded API key is ingested. Content scanning is a separate step: `copilot.security`
+  (Milestone 5c, `docs/security.md`) scans the ingested text, and its fail-closed gate must be
+  called before any repository context is sent to an external LLM (Milestone 6). Ingestion scope
+  itself is unchanged.
 * `.gitignore` is not honoured, so ingesting this project itself would include a populated `data/`
   directory unless it is added with `with_extra_ignored_directories("data")`.
 * Name-based rules are heuristics: false positives (a legitimate `credentials.json` fixture) and
