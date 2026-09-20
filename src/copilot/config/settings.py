@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     chunking_strategy: ChunkingStrategy = "line"
     chunk_size_lines: int = Field(default=60, ge=5, le=1000)
     chunk_overlap_lines: int = Field(default=10, ge=0)
+    # Hard cap (heuristic token estimate, see copilot.utils.tokens) so no chunk can exceed the
+    # embedding model's input limit. 512 is safe for the smallest planned model (bge-small).
+    chunk_max_tokens: int = Field(default=512, ge=16, le=8192)
     retrieval_top_k: int = Field(default=5, ge=1, le=50)
 
     # --- Repository ingestion limits ---

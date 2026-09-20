@@ -148,7 +148,9 @@ environment variables are never logged.
 
 * **No content scanning.** Files are judged by name only. A `.py` file with a hard-coded API key is
   ingested. Because retrieved code will later be sent to an external LLM, a lightweight content
-  scan should be added before Milestone 6 (or, at the latest, in Milestone 13).
+  scan is a **mandatory security task that must be completed before any repository context is sent
+  to an external LLM in Milestone 6** (deliberately deferred; ingestion scope is not otherwise
+  expanded).
 * `.gitignore` is not honoured, so ingesting this project itself would include a populated `data/`
   directory unless it is added with `with_extra_ignored_directories("data")`.
 * Name-based rules are heuristics: false positives (a legitimate `credentials.json` fixture) and

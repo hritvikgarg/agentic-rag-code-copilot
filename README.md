@@ -4,8 +4,8 @@ An academic project: a repository-aware AI assistant that answers questions abou
 using evidence retrieved from that codebase, and cites the files, functions and line ranges
 it used.
 
-> **Status: Milestone 2 (safe repository ingestion).** Only the foundation and repository
-> ingestion exist. Chunking, embeddings, retrieval, the RAG pipeline, agents and the UI described
+> **Status: Milestone 3 (baseline chunking).** Only the foundation, repository ingestion and
+> baseline chunking exist. Embeddings, retrieval, the RAG pipeline, agents and the UI described
 > below are **planned and do not exist yet.** See
 > [Current implementation status](#current-implementation-status).
 
@@ -77,13 +77,14 @@ agentic-rag-code-copilot/
 ├── src/copilot/
 │   ├── config/             # IMPLEMENTED: settings.py, logging_setup.py
 │   ├── ingestion/          # IMPLEMENTED: policy, discovery, reader, loader, CLI
-│   ├── models/             # IMPLEMENTED: ingestion models (SourceFile, IngestionResult, ...)
-│   ├── utils/              # IMPLEMENTED: safe path helpers
-│   ├── parsing/ chunking/ embeddings/ vectorstore/ retrieval/ llm/ rag/ agents/
+│   ├── chunking/           # IMPLEMENTED (baseline only): windows, doc sections, registry, CLI
+│   ├── models/             # IMPLEMENTED: ingestion and chunk models
+│   ├── utils/              # IMPLEMENTED: safe path helpers, token estimate
+│   ├── parsing/ embeddings/ vectorstore/ retrieval/ llm/ rag/ agents/
 │   │   evaluation/ services/
 │   │                       # PLANNED: currently docstring-only packages
 ├── tests/                  # unit/ integration/ security/ + fixtures/ (synthetic repository builder)
-├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md
+├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md, chunking.md
 └── data/                   # local runtime data; contents are git-ignored
 ```
 
@@ -92,7 +93,7 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
 
 ## Current implementation status
 
-**Implemented now (Milestones 1-2)**
+**Implemented now (Milestones 1-3)**
 
 - Project packaging and dependency configuration (`pyproject.toml`).
 - Typed configuration with validation and safe defaults (`copilot.config.Settings`).
@@ -103,11 +104,16 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   undecodable files, never follows symlinks, enforces file-count/size limits, and returns typed
   `SourceFile` objects plus statistics. Supported types: `.py .js .jsx .ts .tsx .java .c .cpp .md
   .json .yaml .yml`. Details, policies and limitations: [`docs/ingestion.md`](docs/ingestion.md).
-- Unit, integration and security tests for the above (run against a synthetic repository).
+- **Baseline chunking** (`copilot.chunking`, strategy `line`): overlapping line windows for code
+  and JSON/YAML, heading sections for Markdown, a hard token cap, deterministic chunk ids and full
+  citation metadata (file, language, line range, type), plus chunk statistics. Only the baseline
+  strategy exists; the structure-aware `ast` strategy is reserved for Milestone 9 and fails loudly
+  if selected. Details and limitations: [`docs/chunking.md`](docs/chunking.md).
+- Unit, integration and security tests for the above (run against synthetic repositories).
 
 **Planned (not implemented; do not expect these to work)**
 
-Chunking, embeddings, vector search, RAG answers, citations,
+Embeddings, vector search, RAG answers, citations,
 Streamlit UI, LangGraph workflow, structure-aware chunking, debugging assistance, evaluation.
 
 ## Setup (current milestone)
@@ -135,6 +141,12 @@ paths only, never file contents):
 uv run python -m copilot.ingestion path/to/repo --skipped
 ```
 
+Chunk a repository with the configured strategy and print chunk statistics (metadata only):
+
+```bash
+uv run python -m copilot.chunking path/to/repo --samples 5
+```
+
 Run the checks:
 
 ```bash
@@ -153,9 +165,9 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 |---|---|---|
 | 0 | Architecture and planning | Done |
 | 1 | Project foundation | Done |
-| 2 | Safe repository ingestion | **Done (this commit)** |
-| 3 | Baseline chunking | Next |
-| 4-7 | Embeddings, retrieval, basic RAG, Streamlit MVP | Planned |
+| 2 | Safe repository ingestion | Done |
+| 3 | Baseline chunking | **Done (this commit)** |
+| 4-7 | Embeddings, retrieval, basic RAG, Streamlit MVP | Planned (next: 4) |
 | 8-11 | LangGraph, structure-aware chunking, two experiments | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |
 
@@ -166,8 +178,9 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 - Never commit API keys, tokens, private keys or credentials. Logging masks known secret values.
 - Ingestion skips sensitive file *names* (`.env*`, keys, credential files), binaries, oversized
   files and unsafe paths, and never follows symlinks. It does **not yet scan file contents** for
-  secrets, so a source file with a hard-coded key would still be ingested (planned before any
-  text is sent to an LLM).
+  secrets, so a source file with a hard-coded key would still be ingested. A content-based
+  secret scanner is a **mandatory task before any repository context is sent to an external LLM
+  (Milestone 6 gate)**.
 - When the LLM is used, retrieved repository text is sent to an external API. Only index public
   or your own repositories when using a hosted provider.
 - The project never executes code from an indexed repository.

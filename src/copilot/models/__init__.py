@@ -1,5 +1,6 @@
-"""Shared data schemas (ingestion models now; chunk and answer schemas in later milestones)."""
+"""Shared data schemas (ingestion and chunk models now; answer schemas in later milestones)."""
 
+from copilot.models.chunk import Chunk, ChunkingResult, ChunkStats, ChunkType
 from copilot.models.ingestion import (
     IngestionResult,
     IngestionStats,
@@ -8,4 +9,14 @@ from copilot.models.ingestion import (
     SourceFile,
 )
 
-__all__ = ["IngestionResult", "IngestionStats", "SkipReason", "SkippedFile", "SourceFile"]
+__all__ = [
+    "Chunk",
+    "ChunkStats",
+    "ChunkType",
+    "ChunkingResult",
+    "IngestionResult",
+    "IngestionStats",
+    "SkipReason",
+    "SkippedFile",
+    "SourceFile",
+]

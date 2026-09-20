@@ -93,3 +93,11 @@ def test_env_example_is_loadable_and_contains_no_real_key():
     text = example.read_text(encoding="utf-8")
     assert not re.search(r"AIza[0-9A-Za-z_\-]{30,}", text)  # Google-style key shape
     assert not re.search(r"(sk|ghp|gho|github_pat)[-_][0-9A-Za-z_\-]{20,}", text)
+
+
+def test_chunk_max_tokens_default_and_bounds():
+    assert make().chunk_max_tokens == 512
+    assert make(chunk_max_tokens=16).chunk_max_tokens == 16
+    for bad in (15, 8193):
+        with pytest.raises(ValidationError):
+            make(chunk_max_tokens=bad)
