@@ -1,8 +1,10 @@
 # Retrieval evaluation (Milestone 5b)
 
-Status: the framework is implemented and tested. **One real-model measurement exists (default
-configuration). The six-configuration matrix has been implemented but NOT yet run with the real
-model** (see "Matrix status"). Nothing here is a claim of generalisation.
+Status: the framework is implemented and tested, and the six-configuration matrix (chunk cap 512 /
+768 / 1024 x `prefixed` / `raw`) has been **run with the real Jina model on native Windows**. Results
+and the resulting default-configuration decision are below. Everything here applies to one
+self-authored, non-independent 34-question benchmark; **nothing is claimed about statistical
+significance or about other repositories.**
 
 ## What is measured, and why
 
@@ -53,6 +55,10 @@ questions one question is 2.9 percentage points.
 
 ## The included benchmark (`benchmarks/copilot_self_055a8d5.jsonl`)
 
+**Pinned repository:** this project at git commit **`055a8d5`** (recorded in the `.meta.json`).
+**Self-authored, not independent:** the benchmark is authored by the same person who wrote the code,
+documentation and retrieval system (`independent: false`).
+
 34 questions about this repository at commit `055a8d5`: 28 implementation questions (relevant regions
 are code only, so a documentation hit counts as a miss) and 6 documentation questions (a doc or code
 region counts). Regions were chosen by reading the source. The benchmark is pinned to a git commit;
@@ -71,7 +77,7 @@ newer working tree, where the regions will legitimately have moved.
   failure depends on the user's need; the implementation questions score it as a miss.
 - The ground-truth regions are function-sized, and the questions were written after seeing the code.
 
-## Measured result: default configuration (real model)
+## Cross-check: default configuration measured on Linux (real model)
 
 Configuration: chunk cap 512 estimated tokens, `prefixed` representation, 60-line windows, 10-line
 overlap, `jinaai/jina-embeddings-v2-base-code`, FAISS `IndexFlatIP`, index `25e726f8fefb403b` (259
@@ -86,6 +92,9 @@ python -m copilot.evaluation run benchmarks/copilot_self_055a8d5.jsonl --repo <e
 | Hit@1 | Hit@3 | Hit@5 | Hit@10 | MRR | mean lines per hit |
 |---|---|---|---|---|---|
 | 47.1% (16/34) | 70.6% (24/34) | 73.5% (25/34) | 82.4% (28/34) | 0.603 | 44.6 |
+
+This run was made before the Windows matrix and is kept as a cross-check: the Windows matrix row for
+cap 512 / `prefixed` (below) reports identical Hit@k, MRR and mean lines per hit.
 
 Where the measurement was made: on a Linux VM, query embeddings from the real Jina model loaded
 from the model cache downloaded on the author's Windows machine (offline); the index itself was built
@@ -115,27 +124,83 @@ The six queries requested for Milestone 5b, top 5, same index. Relevant files we
 Only the last query is fully right at rank 1. The pattern is consistent with the benchmark: the model
 finds the right *topic* but often prefers prose (docs) to the code that implements it.
 
-## Matrix status: NOT RUN
+## Matrix results (real model, native Windows)
 
-The experiment matrix (chunk cap 512 / 768 / 1024 [/ 2048] x representation `prefixed` / `raw`) is
-implemented (`python -m copilot.evaluation matrix`) and unit/integration tested with fake embedders,
-but was **not executed with the real model** in this milestone: the development VM has about 3.9 GB of
-RAM and the process was killed by the operating system while embedding (peak resident memory after
-model load was 2.6 GB and grew during embedding). No numbers from the matrix are reported because none
-exist. Run it on a machine with enough memory (the Windows machine used for Milestone 5a):
+Run by the author on Windows with the real `jinaai/jina-embeddings-v2-base-code` model:
+`python -m copilot.evaluation matrix` over the pinned export of commit `055a8d5`, benchmark
+`copilot-self-055a8d5` (34 questions), top-k depth 10, FAISS `IndexFlatIP`, 60-line windows, 10-line
+overlap. Held constant: repository commit, model, benchmark questions, depth, index type, line size,
+overlap and the match rule (same file, at least one overlapping line). Varied: the estimated-token cap
+and the embedding representation. One run per configuration, no repetition. The cap-2048 option was
+not run. These numbers were supplied from the Windows run (not re-executed in the development
+environment); the 512 / `prefixed` row was independently reproduced on Linux (see above).
 
-```
-git archive 055a8d5 | tar -x -C ..\bench-055a8d5      # or extract the export any other way
-uv run python -m copilot.evaluation matrix benchmarks/copilot_self_055a8d5.jsonl ^
-    --repo ..\bench-055a8d5 --work-dir data\eval-work --caps 512 768 1024 2048 ^
-    --output data\eval-work\result.json
-```
+| Cap | Style | Chunks | Index KB | Embed s | Mean chunk lines | Hit@1 | Hit@3 | Hit@5 | Hit@10 | MRR | Mean lines / hit | Mean lines retrieved |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 512 | prefixed | 259 | 899 | 88.4 | 31.6 | **47.1** | **70.6** | 73.5 | 82.4 | **0.603** | 44.6 | 39.2 |
+| 512 | raw | 259 | 899 | 84.0 | 31.6 | 38.2 | 58.8 | 70.6 | 85.3 | 0.524 | 43.3 | 36.2 |
+| 768 | prefixed | 192 | 667 | 98.0 | 39.7 | 41.2 | 64.7 | 76.5 | 82.4 | 0.553 | 49.5 | 46.8 |
+| 768 | raw | 192 | 667 | 90.8 | 39.7 | 35.3 | 61.8 | 76.5 | 85.3 | 0.514 | 51.6 | 44.6 |
+| 1024 | prefixed | 166 | 577 | 101.4 | 44.4 | 41.2 | 64.7 | 70.6 | 82.4 | 0.562 | 49.5 | 49.4 |
+| 1024 | raw | 166 | 577 | 99.8 | 44.4 | 32.4 | 61.8 | 76.5 | 85.3 | 0.508 | 51.6 | 47.0 |
 
-Held constant across configurations: repository commit, model, benchmark questions, top-k depth,
-FAISS index type, line size (60), overlap (10) and the match rule. Varied: token cap and
-representation. It prints Hit@1/3/5/10, MRR, mean lines per hit, chunk count, index size and timing
-per configuration and declares no winner. When reading the table, compare mean lines per hit and
-chunk count next to Hit@k, as explained above.
+Hit@k and MRR in percent / fraction as reported by the runner. Bold marks the best value in a column
+for Hit@1, Hit@3 and MRR. Embedding time depends on hardware and is informative only.
+
+With 34 questions one question is 2.9 percentage points. The counts behind the table (questions
+hit, out of 34):
+
+| Config | Hit@1 | Hit@3 | Hit@5 | Hit@10 |
+|---|---|---|---|---|
+| 512 prefixed | 16 | 24 | 25 | 28 |
+| 512 raw | 13 | 20 | 24 | 29 |
+| 768 prefixed | 14 | 22 | 26 | 28 |
+| 768 raw | 12 | 21 | 26 | 29 |
+| 1024 prefixed | 14 | 22 | 24 | 28 |
+| 1024 raw | 11 | 21 | 26 | 29 |
+
+### What the table does and does not show
+
+- **Larger chunks have a line-overlap advantage.** Mean chunk size grows from 31.6 to 39.7 to 44.4
+  lines, and the mean size of the first matching chunk from about 44 to about 50 lines. A bigger chunk
+  overlaps a small ground-truth region more easily, so Hit@k for larger caps is *inflated* relative to
+  retrieval quality. Even with that advantage, 768 and 1024 did not beat 512 / `prefixed` at Hit@1,
+  Hit@3 or MRR. Larger caps look better only at Hit@5 (768 `prefixed` 26 vs 25 questions; 768 and 1024
+  `raw` 26 vs 24), a one-to-two-question difference that is consistent with the size advantage.
+- **`raw` reached higher Hit@10 (85.3 vs 82.4, 29 vs 28 questions) at all three caps, but weaker
+  Hit@1 and MRR at all three caps.** In other words `raw` found the answer somewhere in the top 10
+  slightly more often (by one question), while `prefixed` put it nearer the top more often
+  (Hit@1 by 2-3 questions, Hit@3 by 4 questions at 512 and 1 at 768 / 1024, MRR by 0.04-0.08).
+  Hit@5 is mixed (`prefixed` +1 question at 512, equal at 768, `raw` +2 at 1024).
+- The differences are one to three questions on a benchmark written by the code's author. They are
+  **not statistically tested and should not be read as significant.**
+- Cost: a larger cap gives fewer, larger chunks and a smaller index (899 -> 577 KB); embedding time
+  did not change materially (84-101 s) at this repository size.
+
+## Engineering decision: default dense retrieval configuration
+
+**KEEP chunk cap 512 with the `prefixed` embedding representation as the default.** No configuration
+change is required; this is the existing default (`chunk_max_tokens=512`, `embedding_text_style="prefixed"`).
+
+Reasons, all from the table above:
+
+1. Highest Hit@1 (47.1%, 16/34).
+2. Highest Hit@3 (70.6%, 24/34).
+3. Highest MRR (0.603).
+4. Smaller chunks (mean 31.6 lines) than 768 / 1024, hence the smallest line-overlap advantage of the
+   caps tested, so its lead is not explained by chunk size.
+5. Downstream RAG puts only the first few retrieved chunks into the LLM context, so ranking quality at
+   the top of the list matters more than whether the answer appears somewhere in the top 10.
+
+What this decision is and is not:
+
+- It is a **default for this project's dense retriever, based on one self-authored 34-question
+  benchmark.** It does not claim that 512 or `prefixed` is better in general, on other repositories,
+  or with other chunking strategies.
+- No significance is claimed. `raw` reached higher Hit@10 at every cap; if a later use case cares
+  about recall within a large top-k, the choice should be revisited.
+- Revisit when an independent repository is added to the benchmark and when structure-aware chunking
+  (Milestone 9) exists.
 
 ## Reproducing
 
@@ -144,6 +209,9 @@ python -m copilot.evaluation verify BENCH --repo EXPORT
 python -m copilot.evaluation run    BENCH --repo EXPORT --index INDEX_DIR
 python -m copilot.evaluation matrix BENCH --repo EXPORT --work-dir DIR --caps 512 768 1024 --output FILE
 ```
+
+The matrix needs a machine with several GB of free RAM: on a 3.9 GB development VM the embedding
+process was killed by the operating system, which is why the reported matrix was run on Windows.
 
 Use the same `--ignore-dir` values as recorded in the `.meta.json` (they are the defaults). Reported
 timings depend on hardware and are informative only.

@@ -123,8 +123,8 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   Validated on native Windows with the real model (768-d unit vectors, 8192-token limit). On this
   repository the heuristic estimator **systematically underestimates** the real Jina tokenizer
   (89% of chunks; about 14.5% in total), which is safe (largest embedded chunk 736 of 8192 tokens);
-  chunk defaults are unchanged and the metadata-prefixed text is the default with its retrieval
-  benefit **unproven**. Measurements, decisions and the planned retrieval experiment:
+  chunk defaults are unchanged. The Milestone 5b retrieval matrix kept the 512 cap and metadata-prefixed
+  text as defaults (measured on one self-authored benchmark; see below). Measurements and decisions:
   [`docs/embeddings.md`](docs/embeddings.md).
 - **Persistent vector index** (`copilot.vectorstore`): builds an exact FAISS `IndexFlatIP` (cosine
   similarity on unit vectors) from repository -> chunks -> Jina embeddings, with a deterministic
@@ -145,8 +145,12 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
 - **Retrieval evaluation** (`copilot.evaluation`): a transparent JSONL benchmark format (questions
   with hand-verified source regions, pinned by text hashes), Hit@1/3/5/10, MRR and mean lines per
   hit, and a runner for the chunk-cap x representation matrix. The included benchmark covers this
-  repository at a pinned commit and is **not independent** (same author wrote code and questions).
-  Measured results and their limits: [`docs/evaluation.md`](docs/evaluation.md).
+  repository at commit `055a8d5` and is **not independent** (same author wrote code and questions).
+  The 6-configuration matrix (cap 512/768/1024 x prefixed/raw) was run on Windows with the real
+  model: **512 + prefixed** had the best Hit@1 (47.1%), Hit@3 (70.6%) and MRR (0.603) and stays the
+  default; `raw` had higher Hit@10 (85.3% vs 82.4%). Larger chunks have a line-overlap advantage,
+  the differences are one to three questions of 34, and no significance or generalisation is
+  claimed. Full table and limits: [`docs/evaluation.md`](docs/evaluation.md).
 - Unit, integration and security tests for the above (run against synthetic repositories).
 
 **Planned (not implemented; do not expect these to work)**
@@ -235,7 +239,7 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | 3 | Baseline chunking | Done |
 | 4 | Embedding service and tokenizer validation | **Done (validated on Windows)** |
 | 5a | FAISS vector index | **Done (validated on Windows)** |
-| 5b | Semantic retrieval and retrieval evaluation | **Done (real-model measurements in `docs/evaluation.md`)** |
+| 5b | Semantic retrieval and retrieval evaluation | **Done (matrix run on Windows; results in `docs/evaluation.md`)** |
 | 6-7 | Basic RAG, Streamlit MVP | Planned |
 | 8-11 | LangGraph, structure-aware chunking, two experiments | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |

@@ -152,7 +152,10 @@ representations are not comparable.
 | cosine(raw vector, prefixed vector): mean / min / max | 0.921 / 0.809 / 0.988 |
 | Prefix cost in real Jina tokens: median / max | 23.5 / 27 (all 294 chunks: 23.5 / 29) |
 
-**Decision.** `prefixed` stays the default. **Its retrieval benefit is UNPROVEN.** The cosine
+**Decision.** `prefixed` stays the default. *Update (Milestone 5b): the retrieval benchmark has been
+run; on a self-authored 34-question benchmark `prefixed` had better Hit@1 and MRR than `raw` at all
+three caps, but `raw` had higher Hit@10; not statistically tested. See `docs/evaluation.md`.* The
+original Milestone 4 statement follows. **Its retrieval benefit was UNPROVEN.** The cosine
 figures show only that the prefix moves each vector by a modest, non-trivial amount (the closest
 pair is 0.988, the furthest 0.809); they say nothing about whether the moved vectors retrieve
 better. Retrieval does not exist yet. The prefixed and raw representations must be compared on the
@@ -230,8 +233,9 @@ the model's context capacity.
 
 ## Planned retrieval experiment (retrieval/evaluation milestone)
 
-Not run yet. The index layer that stores each variant under its own deterministic id exists
-(`docs/vector-index.md`); the experiment itself needs semantic retrieval and the benchmark. Record of the intended design so the decision above is revisited with evidence:
+**Run in Milestone 5b** (caps 512 / 768 / 1024 x `prefixed` / `raw`; 2048 not run): results,
+limitations and the decision to keep 512 + `prefixed` are in `docs/evaluation.md`. The original design
+record follows:
 
 * **Variable A, cap:** `chunk_max_tokens` = **512** (current), **768**, **1024** (estimated
   tokens), at minimum. Keep `chunk_size_lines=60` and `chunk_overlap_lines=10` fixed so the cap is

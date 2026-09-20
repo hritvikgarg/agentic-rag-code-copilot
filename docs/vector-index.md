@@ -240,13 +240,14 @@ repository, files, chunks, vectors, dimension, representation, index type, index
 sizes; never vectors or source text. `info` and `validate` do **not** load the embedding model. `validate`
 exits 0 when intact, 1 when invalid or incompatible, 2 for usage or other errors.
 
-## 13. Planned retrieval experiment (not run in this milestone)
+## 13. Retrieval experiment (designed here; run in Milestone 5b)
 
 Recorded so the next milestone can execute it on this index layer: caps 512 / 768 / 1024 estimated
 tokens (2048 optional) crossed with `prefixed` vs `raw`, model, top_k, benchmark and retrieval method held
 constant; Hit@k and MRR plus chunk count, index size and embedding time; expected results matched by
 file path and line overlap, never by chunk id. Each configuration is a separate index id, so they coexist.
-Details: `docs/embeddings.md`. No number in this document is a retrieval result.
+Details: `docs/embeddings.md`. The experiment was executed in Milestone 5b; its results are in
+`docs/evaluation.md`. No number in this document is a retrieval result.
 
 ## 14. Security
 
