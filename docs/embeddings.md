@@ -23,7 +23,7 @@ never uses those words (`create_engine(url)`); embeddings match by meaning, incl
 natural language and code.
 
 **How we use them.** Each chunk is embedded once at indexing time; each question is embedded at
-query time; the nearest chunk vectors are the candidate evidence (Milestone 5).
+query time; the nearest chunk vectors are the candidate evidence (semantic retrieval milestone).
 
 **Without them.** Retrieval would be exact-word matching only, and the assistant would either
 miss relevant code or fall back on the LLM's general knowledge, which is what this project exists
@@ -228,16 +228,17 @@ unchanged. There is no safety issue against the 8192-token limit, and changing c
 retrieval evidence would be premature. The final choice must be made on retrieval quality, not on
 the model's context capacity.
 
-## Planned retrieval experiment (Milestone 5 onward)
+## Planned retrieval experiment (retrieval/evaluation milestone)
 
-Not run yet. Record of the intended design so the decision above is revisited with evidence:
+Not run yet. The index layer that stores each variant under its own deterministic id exists
+(`docs/vector-index.md`); the experiment itself needs semantic retrieval and the benchmark. Record of the intended design so the decision above is revisited with evidence:
 
 * **Variable A, cap:** `chunk_max_tokens` = **512** (current), **768**, **1024** (estimated
   tokens), at minimum. Keep `chunk_size_lines=60` and `chunk_overlap_lines=10` fixed so the cap is
   the only chunking variable (a later sweep may vary lines and overlap). Cap 2048 is optional.
 * **Variable B, representation:** `prefixed` vs `raw`, run for each cap.
 * **Held constant:** embedding model, `top_k`, benchmark questions, and the retrieval method.
-* **Metrics:** Hit@k and MRR against expected files/symbols (Milestone 5 benchmark), plus chunk
+* **Metrics:** Hit@k and MRR against expected files/symbols (retrieval benchmark), plus chunk
   count, index size and embedding time as costs.
 * **Matching:** chunk IDs change with `chunk_max_tokens` (it is part of the ID contract), so
   expected results must be matched by file path and line-range overlap, never by chunk ID.

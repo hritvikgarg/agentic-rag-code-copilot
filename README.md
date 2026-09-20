@@ -4,9 +4,10 @@ An academic project: a repository-aware AI assistant that answers questions abou
 using evidence retrieved from that codebase, and cites the files, functions and line ranges
 it used.
 
-> **Status: Milestone 4 (embedding service, validated with the real model on Windows).** Only the foundation,
-> repository ingestion, baseline chunking and a local embedding service exist. Retrieval, the RAG pipeline, agents and the UI described
-> below are **planned and do not exist yet.** See
+> **Status: Milestone 5 (persistent FAISS vector index).** Only the foundation, repository
+> ingestion, baseline chunking, a local embedding service and a persistent vector index exist.
+> Semantic retrieval, the RAG pipeline, agents and the UI described below are **planned and do
+> not exist yet.** See
 > [Current implementation status](#current-implementation-status).
 
 ## Academic context
@@ -61,7 +62,7 @@ The full design, technology decisions, milestones and evaluation plan are in
 | Logging | Standard library `logging` with secret redaction | **Implemented now** |
 | Testing / lint | `pytest`, `pytest-cov`, `ruff` | **Implemented now** |
 | Embeddings | `fastembed` (ONNX), `jina-embeddings-v2-base-code`, fallback `bge-small-en-v1.5` (unused) | **Implemented and validated on Windows (Milestone 4)** |
-| Vector store | FAISS `IndexFlatIP` + JSON sidecar + manifest | Planned (next milestone) |
+| Vector index | FAISS `IndexFlatIP` (exact) + JSONL sidecar + manifest, atomic save | **Implemented (Milestone 5; tested with fake embeddings, real-model run pending on Windows)** |
 | LLM | Gemini via `google-genai`; Ollama optional fallback | Planned (Milestone 6) |
 | Interface | Streamlit | Planned (Milestone 7) |
 | Orchestration | LangGraph | Planned (Milestone 8) |
@@ -81,11 +82,12 @@ agentic-rag-code-copilot/
 │   ├── models/             # IMPLEMENTED: ingestion and chunk models
 │   ├── embeddings/         # IMPLEMENTED: Embedder interface, fastembed adapter, token validation
 │   ├── utils/              # IMPLEMENTED: safe path helpers, token estimate
-│   ├── parsing/ vectorstore/ retrieval/ llm/ rag/ agents/
+│   ├── vectorstore/        # IMPLEMENTED: FAISS index, manifest, fingerprint, atomic save, CLI
+│   ├── parsing/ retrieval/ llm/ rag/ agents/
 │   │   evaluation/ services/
 │   │                       # PLANNED: currently docstring-only packages
 ├── tests/                  # unit/ integration/ security/ + fixtures/ (synthetic repository builder)
-├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md, chunking.md, embeddings.md
+├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md, chunking.md, embeddings.md, vector-index.md
 └── data/                   # local runtime data; contents are git-ignored
 ```
 
@@ -94,7 +96,7 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
 
 ## Current implementation status
 
-**Implemented now (Milestones 1-4)**
+**Implemented now (Milestones 1-5)**
 
 - Project packaging and dependency configuration (`pyproject.toml`).
 - Typed configuration with validation and safe defaults (`copilot.config.Settings`).
@@ -120,13 +122,22 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   repository the heuristic estimator **systematically underestimates** the real Jina tokenizer
   (89% of chunks; about 14.5% in total), which is safe (largest embedded chunk 736 of 8192 tokens);
   chunk defaults are unchanged and the metadata-prefixed text is the default with its retrieval
-  benefit **unproven**. No vector index and no retrieval exist yet. Measurements, decisions and the
-  planned retrieval experiment: [`docs/embeddings.md`](docs/embeddings.md).
+  benefit **unproven**. Measurements, decisions and the planned retrieval experiment:
+  [`docs/embeddings.md`](docs/embeddings.md).
+- **Persistent vector index** (`copilot.vectorstore`): builds an exact FAISS `IndexFlatIP` (cosine
+  similarity on unit vectors) from repository -> chunks -> Jina embeddings, with a deterministic
+  repository fingerprint, a deterministic index id, a verified vector-position <-> chunk-id mapping
+  (`chunks.jsonl`, citation metadata only, no source text), a `manifest.json` recording every
+  compatibility-critical setting and artifact checksums, strict loading that **refuses**
+  incompatible, stale or corrupt indexes, and atomic saves. CLI: `python -m copilot.vectorstore
+  {build,info,validate}` (`info` and `validate` do not load the model). This is indexing and
+  persistence only: **there is no semantic search or ranking API yet.** Details, contracts and
+  limitations: [`docs/vector-index.md`](docs/vector-index.md).
 - Unit, integration and security tests for the above (run against synthetic repositories).
 
 **Planned (not implemented; do not expect these to work)**
 
-Vector index (FAISS) and semantic search, RAG answers, citations,
+Semantic retrieval and its benchmark, RAG answers, citations,
 Streamlit UI, LangGraph workflow, structure-aware chunking, debugging assistance, evaluation.
 
 ## Setup (current milestone)
@@ -168,6 +179,15 @@ Chunk a repository with the configured strategy and print chunk statistics (meta
 
 ```bash
 uv run python -m copilot.chunking path/to/repo --samples 5
+```
+
+Build and inspect a vector index (loads the embedding model; the first run downloads ~0.64 GB;
+`info` and `validate` never load it):
+
+```bash
+uv run python -m copilot.vectorstore build path/to/repo --ignore-dir data
+uv run python -m copilot.vectorstore info data/indexes/<index-id>
+uv run python -m copilot.vectorstore validate data/indexes/<index-id> --repo path/to/repo --ignore-dir data
 ```
 
 Run the checks:
