@@ -3,6 +3,8 @@ name = "agentic-rag-code-copilot"
 version = "0.1.0"
 description = "Agentic RAG-based software engineering copilot for repository-aware code analysis and debugging (university GenAI course project)."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pydantic-settings>=2.4",

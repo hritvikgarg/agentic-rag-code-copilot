@@ -71,6 +71,7 @@ The full design, technology decisions, milestones and evaluation plan are in
 ```
 agentic-rag-code-copilot/
 ├── pyproject.toml          # project metadata, dependencies, tool configuration
+├── LICENSE                 # MIT
 ├── .env.example            # variable names and placeholders only (never real secrets)
 ├── src/copilot/
 │   ├── config/             # IMPLEMENTED: settings.py, logging_setup.py
@@ -110,7 +111,7 @@ cd agentic-rag-code-copilot
 uv sync                      # creates .venv with Python 3.12 and installs dependencies
 ```
 
-Optional configuration (nothing needs a key yet):
+Optional configuration (nothing needs a key yet; the LLM model ID is intentionally unset until Milestone 6):
 
 ```bash
 cp .env.example .env         # Windows PowerShell: Copy-Item .env.example .env
@@ -149,3 +150,7 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 - When the LLM is used, retrieved repository text is sent to an external API. Only index public
   or your own repositories when using a hosted provider.
 - The project never executes code from an indexed repository.
+
+## License
+
+Released under the [MIT License](LICENSE).
