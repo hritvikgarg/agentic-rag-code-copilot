@@ -167,9 +167,12 @@ contained in another; every non-blank line is covered by at least one chunk.
   documents this); that is what Strategy B is compared against.
 * With the default 512-token cap, dense text reaches the cap before 60 lines, so effective windows
   are often shorter than 60 lines and overlap is reduced. The defaults are unmeasured starting
-  points. On this repository (Milestone 3 measurement): 216 chunks, median 489 / p95 511 estimated
-  tokens, 5240 source lines represented, 1453 lines duplicated by overlap.
-* The token estimator is provisional until Milestone 4.
+  points. On this repository at commit `9e3586f`: 220 chunks, median 490 / p95 511 estimated
+  tokens, 5343 source lines represented, 1491 lines duplicated by overlap, and 89% of non-final
+  chunks shortened by the cap (see `docs/embeddings.md` for the cap sweep).
+* The token estimator is provisional: its comparison with the real embedding tokenizer is implemented
+  (`python -m copilot.embeddings tokens`, see `docs/embeddings.md`) but has not yet been run against
+  the real model.
 * JSON/YAML windows can cut mid-structure.
 * Chunks do not yet include a file-path/context header for embedding (decided in Milestone 4).
 * The id contract identifies repositories by `repository_name` only (see above).

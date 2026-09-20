@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # --- Embeddings ---
     # Preferred model; subject to the Milestone 4 compatibility test (fallback: bge-small).
     embedding_model: str = "jinaai/jina-embeddings-v2-base-code"
+    embedding_batch_size: int = Field(default=32, ge=1, le=512)  # texts per ONNX forward pass
+    embedding_threads: int | None = Field(default=None, ge=1)  # None: onnxruntime decides
+    # Where downloaded model files are cached. None -> <data_dir>/cache/models (git-ignored).
+    # fastembed's own default is the OS temp directory, which can be purged, so we set our own.
+    embedding_cache_dir: Path | None = None
+    # How a chunk is turned into embedding text (see copilot.embeddings.representation).
+    embedding_text_style: Literal["prefixed", "raw"] = "prefixed"
 
     # --- Chunking and retrieval (initial defaults, to be tuned by measurement) ---
     chunking_strategy: ChunkingStrategy = "line"
@@ -100,6 +107,11 @@ class Settings(BaseSettings):
     def cache_dir(self) -> Path:
         """Where response/model caches will live (git-ignored)."""
         return self.data_dir / "cache"
+
+    @property
+    def model_cache_dir(self) -> Path:
+        """Where embedding model files are cached (git-ignored unless overridden)."""
+        return self.embedding_cache_dir or self.cache_dir / "models"
 
     def secret_values(self) -> list[str]:
         """Plain-text secret values, used only to redact them from log output."""

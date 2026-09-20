@@ -4,8 +4,8 @@ An academic project: a repository-aware AI assistant that answers questions abou
 using evidence retrieved from that codebase, and cites the files, functions and line ranges
 it used.
 
-> **Status: Milestone 3 (baseline chunking).** Only the foundation, repository ingestion and
-> baseline chunking exist. Embeddings, retrieval, the RAG pipeline, agents and the UI described
+> **Status: Milestone 4 (embedding service; real-model validation pending).** Only the foundation,
+> repository ingestion, baseline chunking and a local embedding service exist. Retrieval, the RAG pipeline, agents and the UI described
 > below are **planned and do not exist yet.** See
 > [Current implementation status](#current-implementation-status).
 
@@ -60,8 +60,8 @@ The full design, technology decisions, milestones and evaluation plan are in
 | Configuration | `pydantic-settings` (`.env`, environment variables) | **Implemented now** |
 | Logging | Standard library `logging` with secret redaction | **Implemented now** |
 | Testing / lint | `pytest`, `pytest-cov`, `ruff` | **Implemented now** |
-| Embeddings | `fastembed` (ONNX), `jina-embeddings-v2-base-code`, fallback `bge-small-en-v1.5` | Planned (Milestone 4) |
-| Vector store | FAISS `IndexFlatIP` + JSON sidecar + manifest | Planned (Milestone 4) |
+| Embeddings | `fastembed` (ONNX), `jina-embeddings-v2-base-code`, fallback `bge-small-en-v1.5` (unused) | **Implemented (Milestone 4); real model not yet run here** |
+| Vector store | FAISS `IndexFlatIP` + JSON sidecar + manifest | Planned (next milestone) |
 | LLM | Gemini via `google-genai`; Ollama optional fallback | Planned (Milestone 6) |
 | Interface | Streamlit | Planned (Milestone 7) |
 | Orchestration | LangGraph | Planned (Milestone 8) |
@@ -79,12 +79,13 @@ agentic-rag-code-copilot/
 │   ├── ingestion/          # IMPLEMENTED: policy, discovery, reader, loader, CLI
 │   ├── chunking/           # IMPLEMENTED (baseline only): line windows, registry, stats, CLI
 │   ├── models/             # IMPLEMENTED: ingestion and chunk models
+│   ├── embeddings/         # IMPLEMENTED: Embedder interface, fastembed adapter, token validation
 │   ├── utils/              # IMPLEMENTED: safe path helpers, token estimate
-│   ├── parsing/ embeddings/ vectorstore/ retrieval/ llm/ rag/ agents/
+│   ├── parsing/ vectorstore/ retrieval/ llm/ rag/ agents/
 │   │   evaluation/ services/
 │   │                       # PLANNED: currently docstring-only packages
 ├── tests/                  # unit/ integration/ security/ + fixtures/ (synthetic repository builder)
-├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md, chunking.md
+├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md, chunking.md, embeddings.md
 └── data/                   # local runtime data; contents are git-ignored
 ```
 
@@ -93,7 +94,7 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
 
 ## Current implementation status
 
-**Implemented now (Milestones 1-3)**
+**Implemented now (Milestones 1-4)**
 
 - Project packaging and dependency configuration (`pyproject.toml`).
 - Typed configuration with validation and safe defaults (`copilot.config.Settings`).
@@ -110,11 +111,19 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   language, 1-based line range) and chunk/line statistics. Only the baseline
   strategy exists; the structure-aware `ast` strategy is reserved for Milestone 9 and fails loudly
   if selected. Details and limitations: [`docs/chunking.md`](docs/chunking.md).
+- **Local embedding service** (`copilot.embeddings`): an `Embedder` interface (`embed_documents`,
+  `embed_query`, `count_tokens`), a fastembed/ONNX adapter for `jinaai/jina-embeddings-v2-base-code`
+  (768-d, unit-length vectors), a deterministic fake for tests, batching, a documented model cache,
+  a chunk-to-embedding-text representation (metadata prefix, raw source untouched), `chunk_id <->
+  vector` pairing, and tooling that measures the token estimator against the real tokenizer.
+  **Not yet validated against the real model** (it could not be downloaded in the development
+  sandbox), so the estimated-vs-actual results are pending. No vector index and no retrieval exist.
+  Details, verified facts and open items: [`docs/embeddings.md`](docs/embeddings.md).
 - Unit, integration and security tests for the above (run against synthetic repositories).
 
 **Planned (not implemented; do not expect these to work)**
 
-Embeddings, vector search, RAG answers, citations,
+Vector index (FAISS) and semantic search, RAG answers, citations,
 Streamlit UI, LangGraph workflow, structure-aware chunking, debugging assistance, evaluation.
 
 ## Setup (current milestone)
@@ -142,6 +151,16 @@ paths only, never file contents):
 uv run python -m copilot.ingestion path/to/repo --skipped
 ```
 
+Inspect embeddings (the model downloads ~0.64 GB into `data/cache/models` on first load; `info` and
+`sizes` need no download):
+
+```bash
+uv run python -m copilot.embeddings info
+uv run python -m copilot.embeddings sizes path/to/repo --ignore-dir data
+uv run python -m copilot.embeddings smoke path/to/repo -n 8
+uv run python -m copilot.embeddings tokens path/to/repo
+```
+
 Chunk a repository with the configured strategy and print chunk statistics (metadata only):
 
 ```bash
@@ -167,8 +186,9 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | 0 | Architecture and planning | Done |
 | 1 | Project foundation | Done |
 | 2 | Safe repository ingestion | Done |
-| 3 | Baseline chunking | **Done (this commit)** |
-| 4-7 | Embeddings, retrieval, basic RAG, Streamlit MVP | Planned (next: 4) |
+| 3 | Baseline chunking | Done |
+| 4 | Embedding service and tokenizer validation | **Implemented; real-model measurements pending** |
+| 5-7 | Vector store and retrieval, basic RAG, Streamlit MVP | Planned |
 | 8-11 | LangGraph, structure-aware chunking, two experiments | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |
 

@@ -101,3 +101,27 @@ def test_chunk_max_tokens_default_and_bounds():
     for bad in (15, 8193):
         with pytest.raises(ValidationError):
             make(chunk_max_tokens=bad)
+
+
+def test_embedding_settings_defaults_and_cache_dir():
+    s = make()
+    assert s.embedding_model == "jinaai/jina-embeddings-v2-base-code"
+    assert s.embedding_batch_size == 32
+    assert s.embedding_threads is None
+    assert s.embedding_text_style == "prefixed"
+    assert s.model_cache_dir == s.data_dir / "cache" / "models"  # inside git-ignored /data
+    assert make(embedding_cache_dir=Path("elsewhere")).model_cache_dir == Path("elsewhere")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"embedding_batch_size": 0},
+        {"embedding_batch_size": 513},
+        {"embedding_threads": 0},
+        {"embedding_text_style": "fancy"},
+    ],
+)
+def test_invalid_embedding_settings_are_rejected(bad):
+    with pytest.raises(ValidationError):
+        make(**bad)

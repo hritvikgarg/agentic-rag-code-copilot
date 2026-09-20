@@ -36,6 +36,8 @@ htmlcov/
 *.faiss
 *.index
 .fastembed_cache/
+*.onnx
+*.safetensors
 /models/
 
 # --- Evaluation: raw run output is local; curated final results are committed ---
