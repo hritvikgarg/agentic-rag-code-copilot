@@ -1,13 +1,13 @@
-"""Markdown section splitting for documentation files.
+"""Markdown heading-section splitter. **Not used by the baseline strategy.**
 
-Documentation is prose organised by headings, so the natural unit is a *section*, not a fixed
-line window. Sections larger than the configured window/token limits are split with the same
-window algorithm as code, so no chunk ever exceeds the limits.
+Strategy A ("line") is a true structure-blind baseline: Markdown is windowed by lines exactly like
+source code, and headings are ordinary text. This module is a standalone utility kept for a
+future *structure-aware* strategy/experiment (Milestone 9 or later). Nothing in the baseline
+imports it (a test proves that), so it cannot influence Strategy A.
 
 Supported: ATX headings (``# Title`` .. ``###### Title``); headings inside fenced code blocks are
 ignored. Not supported: setext headings (``Title`` underlined with ``===``), HTML headings.
-A heading with no body of its own (e.g. ``# Title`` directly followed by ``## Section``) is merged
-into the following section so it does not become a useless one-line chunk.
+A heading with no body of its own is merged into the following section.
 """
 
 from __future__ import annotations

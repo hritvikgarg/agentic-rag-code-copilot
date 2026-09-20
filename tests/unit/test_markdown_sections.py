@@ -1,4 +1,4 @@
-from copilot.chunking.doc_chunker import split_markdown_sections
+from copilot.chunking.markdown_sections import split_markdown_sections
 from copilot.chunking.windows import split_lines
 
 

@@ -153,7 +153,7 @@ agentic-rag-code-copilot/
 │   ├── models/               # schemas: RepoFile, Chunk, RetrievedChunk, Citation, Answer, GraphState
 │   ├── ingestion/            # discovery.py, filters.py, secrets.py, archive.py (zip-safe), loader.py, git_source.py (optional, later)
 │   ├── parsing/              # python_ast.py (symbol table), markdown.py, languages.py
-│   ├── chunking/             # base.py (Chunker protocol), line_chunker.py (A), ast_chunker.py (B), doc_chunker.py, registry.py
+│   ├── chunking/             # base.py (Chunker protocol), line_chunker.py (A), ast_chunker.py (B), markdown_sections.py (isolated utility, not used by A), registry.py
 │   ├── embeddings/           # base.py, fastembed_embedder.py, fake.py
 │   ├── vectorstore/          # base.py, faiss_store.py, manifest.py (model/dim/chunker/repo-hash guard)
 │   ├── retrieval/            # semantic.py, lexical.py, hybrid.py (RRF fusion), symbol_lookup.py (AST usages)
@@ -194,7 +194,7 @@ Deviations from your starting sketch, with reasons: `app/` → `src/copilot/` (s
 - **services**: `CopilotService.index(repo_path, strategy) / ask(question, error_text=None)`.
 
 ### Chunk metadata schema (the contract everything depends on)
-`chunk_id, repo_id, file_path (relative, POSIX), language, chunk_type (function|method|class|module_header|line_window|doc_section), symbol_name, qualified_name (Class.method), parent_class, start_line, end_line (1-based, inclusive), content, content_sha256, token_estimate, chunking_strategy`
+`chunk_id, repo_id, file_path (relative, POSIX), language, chunk_type (baseline: line_window; structure-aware types such as function|method|class|module_header are added in Milestone 9), symbol_name, qualified_name (Class.method), parent_class, start_line, end_line (1-based, inclusive), content, content_sha256, token_estimate, chunking_strategy`
 
 ---
 
@@ -224,10 +224,10 @@ Rules that apply to every milestone: implement only that milestone; run its test
 - **ACCEPTANCE:** Every bait item is excluded with the correct reason; no secret string appears in logs or the report (asserted); path-traversal attempts raise `UnsafePathError`; running on a real repo prints a sane report; running twice yields identical output.
 
 ### Milestone 3 — Baseline chunking (Strategy A)
-- **STATUS:** Implemented (baseline only). Implementation notes in `docs/chunking.md`; `chunk_max_tokens` setting added for the hard token cap; `ast` is reserved and unregistered (amendment 11).
+- **STATUS:** Implemented (baseline only) and corrected after review: Strategy A is structure-blind for *all* file types (Markdown included), so the Markdown heading chunker listed under WHAT WILL BE BUILT is **not** part of the baseline; it survives only as an isolated utility (`chunking/markdown_sections.py`) for a future structure-aware strategy. The chunk-id formula, line semantics, fragment and statistics contracts are in `docs/chunking.md`; `chunk_max_tokens` setting added; `ast` is reserved and unregistered (amendment 11).
 - **OBJECTIVE:** A transparent, working baseline chunker with correct metadata.
-- **WHAT WILL BE BUILT:** `Chunk` schema; line-window chunker (target N lines/tokens, overlap M, hard token cap); Markdown heading chunker for docs; deterministic `chunk_id`; `Chunker` protocol and registry keyed by strategy name; chunk statistics (count, mean/median/p95 tokens).
-- **KEY FILES:** `chunking/{base,line_chunker,doc_chunker,registry}.py`, `utils/tokens.py`.
+- **WHAT WILL BE BUILT:** `Chunk` schema; line-window chunker (target N lines/tokens, overlap M, hard token cap); (Markdown heading chunker dropped from the baseline after review, see STATUS); deterministic `chunk_id`; `Chunker` protocol and registry keyed by strategy name; chunk statistics (count, mean/median/p95 tokens).
+- **KEY FILES:** `chunking/{base,windows,line_chunker,registry,stats}.py`, `chunking/markdown_sections.py` (isolated), `models/chunk.py`, `utils/tokens.py`.
 - **TESTS:** Invariant tests: for every chunk, `content == source_lines[start-1:end]`; no chunk exceeds the token cap; overlap correct; empty and one-line files; very long single line; unicode; CRLF; determinism; golden chunk list for the fixture repo.
 - **ACCEPTANCE:** Invariants hold on the fixture repo and on one real repo; stats printed; strategy selectable by name from `Settings`.
 

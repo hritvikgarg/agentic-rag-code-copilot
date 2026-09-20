@@ -77,7 +77,7 @@ agentic-rag-code-copilot/
 ├── src/copilot/
 │   ├── config/             # IMPLEMENTED: settings.py, logging_setup.py
 │   ├── ingestion/          # IMPLEMENTED: policy, discovery, reader, loader, CLI
-│   ├── chunking/           # IMPLEMENTED (baseline only): windows, doc sections, registry, CLI
+│   ├── chunking/           # IMPLEMENTED (baseline only): line windows, registry, stats, CLI
 │   ├── models/             # IMPLEMENTED: ingestion and chunk models
 │   ├── utils/              # IMPLEMENTED: safe path helpers, token estimate
 │   ├── parsing/ embeddings/ vectorstore/ retrieval/ llm/ rag/ agents/
@@ -104,9 +104,10 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   undecodable files, never follows symlinks, enforces file-count/size limits, and returns typed
   `SourceFile` objects plus statistics. Supported types: `.py .js .jsx .ts .tsx .java .c .cpp .md
   .json .yaml .yml`. Details, policies and limitations: [`docs/ingestion.md`](docs/ingestion.md).
-- **Baseline chunking** (`copilot.chunking`, strategy `line`): overlapping line windows for code
-  and JSON/YAML, heading sections for Markdown, a hard token cap, deterministic chunk ids and full
-  citation metadata (file, language, line range, type), plus chunk statistics. Only the baseline
+- **Baseline chunking** (`copilot.chunking`, strategy `line`): a structure-blind baseline that cuts
+  *all* supported text (code, Markdown, JSON, YAML) into overlapping line windows, with an
+  estimated-token safety cap, a documented deterministic chunk-id contract, citation metadata (file,
+  language, 1-based line range) and chunk/line statistics. Only the baseline
   strategy exists; the structure-aware `ast` strategy is reserved for Milestone 9 and fails loudly
   if selected. Details and limitations: [`docs/chunking.md`](docs/chunking.md).
 - Unit, integration and security tests for the above (run against synthetic repositories).

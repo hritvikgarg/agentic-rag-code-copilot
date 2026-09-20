@@ -1,4 +1,4 @@
-"""Chunk statistics: counts and token-size distribution."""
+"""Chunk statistics: counts, physical-line accounting and token-size distribution."""
 
 from __future__ import annotations
 
@@ -19,17 +19,38 @@ def percentile(sorted_values: Sequence[int], q: float) -> float:
 
 
 def compute_stats(
-    chunks: Sequence[Chunk], *, strategy: str, total_files: int, elapsed_seconds: float
+    chunks: Sequence[Chunk],
+    *,
+    strategy: str,
+    total_files: int,
+    source_lines_total: int,
+    elapsed_seconds: float,
 ) -> ChunkStats:
-    """Summarise ``chunks`` produced from ``total_files`` files."""
+    """Summarise ``chunks`` produced from ``total_files`` files (``source_lines_total`` lines)."""
     tokens = sorted(c.token_estimate for c in chunks)
     files_chunked = len({c.file_path for c in chunks})
+
+    whole = [c for c in chunks if not c.is_fragment]
+    fragments = [c for c in chunks if c.is_fragment]
+
+    whole_slots = 0  # sum of line counts of whole-line chunks
+    whole_lines: set[tuple[str, int]] = set()
+    for c in whole:
+        whole_slots += c.end_line - c.start_line + 1
+        whole_lines.update((c.file_path, n) for n in range(c.start_line, c.end_line + 1))
+    fragmented_lines = {(c.file_path, c.start_line) for c in fragments}
+
     return ChunkStats(
         strategy=strategy,
         files_chunked=files_chunked,
         files_without_chunks=total_files - files_chunked,
         chunk_count=len(chunks),
-        line_fragment_count=sum(c.line_fragment for c in chunks),
+        whole_line_chunk_count=len(whole),
+        fragment_chunk_count=len(fragments),
+        fragmented_line_count=len(fragmented_lines),
+        source_lines_total=source_lines_total,
+        unique_source_lines_represented=len(whole_lines | fragmented_lines),
+        overlap_duplicated_lines=whole_slots - len(whole_lines),
         tokens_mean=statistics.fmean(tokens) if tokens else 0.0,
         tokens_median=float(statistics.median(tokens)) if tokens else 0.0,
         tokens_p95=percentile(tokens, 95),

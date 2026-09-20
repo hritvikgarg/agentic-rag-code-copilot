@@ -48,17 +48,30 @@ def main(argv: list[str] | None = None) -> int:
     result = chunk_repository(ingestion, chunker)
     stats = result.stats
     if args.json:
-        print(json.dumps({"params": chunker.params(), "stats": stats.model_dump()}, indent=2))
+        payload = {
+            "version": chunker.version,
+            "params": chunker.params(),
+            "stats": stats.model_dump(),
+        }
+        print(json.dumps(payload, indent=2))
         return 0
 
     print(f"repository:          {result.repository_name}")
-    print(f"strategy:            {chunker.name} {chunker.params()}")
+    print(f"strategy:            {chunker.name} v{chunker.version} {chunker.params()}")
     print(f"files ingested:      {ingestion.stats.files_accepted}")
     print(
         f"files chunked:       {stats.files_chunked} (without chunks: {stats.files_without_chunks})"
     )
-    print(f"chunks:              {stats.chunk_count}")
-    print(f"line fragments:      {stats.line_fragment_count}")
+    print(
+        f"chunks:              {stats.chunk_count} "
+        f"(whole-line: {stats.whole_line_chunk_count}, fragments: {stats.fragment_chunk_count})"
+    )
+    print(
+        f"source lines:        total={stats.source_lines_total} "
+        f"represented={stats.unique_source_lines_represented} "
+        f"overlap-duplicated={stats.overlap_duplicated_lines} "
+        f"fragmented-lines={stats.fragmented_line_count}"
+    )
     print(
         f"tokens (estimate):   mean={stats.tokens_mean:.1f} median={stats.tokens_median:.1f} "
         f"p95={stats.tokens_p95:.1f} max={stats.tokens_max}"
@@ -67,10 +80,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"by language:         {stats.by_language}")
     print(f"elapsed:             {stats.elapsed_seconds:.3f}s")
     for chunk in result.chunks[: max(args.samples, 0)]:
-        heading = f"  heading={chunk.heading!r}" if chunk.heading else ""
+        part = (
+            f" fragment={chunk.fragment_index + 1}/{chunk.fragment_count}"
+            if chunk.is_fragment
+            else ""
+        )
         print(
             f"  {chunk.chunk_id}  {chunk.file_path}:{chunk.start_line}-{chunk.end_line}  "
-            f"{chunk.chunk_type.value}  tokens={chunk.token_estimate}{heading}"
+            f"{chunk.chunk_type.value}  tokens={chunk.token_estimate}{part}"
         )
     return 0
 

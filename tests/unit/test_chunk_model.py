@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from copilot.models import Chunk, ChunkType
-from copilot.models.chunk import make_chunk_id, sha256_text
+from copilot.models.chunk import sha256_text
 
 
 def make_chunk(**overrides):
@@ -11,9 +11,11 @@ def make_chunk(**overrides):
         "chunk_id": "0123456789abcdef",
         "repository_name": "repo",
         "file_path": "src/a.py",
+        "source_sha256": "a" * 64,
         "language": "python",
-        "chunk_type": ChunkType.CODE_WINDOW,
+        "chunk_type": ChunkType.LINE_WINDOW,
         "chunking_strategy": "line",
+        "chunking_version": 1,
         "chunk_index": 0,
         "start_line": 1,
         "end_line": 1,
@@ -25,13 +27,18 @@ def make_chunk(**overrides):
     return Chunk(**values)
 
 
-def test_valid_chunk_has_no_symbol_metadata_by_default():
+def test_valid_chunk_has_no_symbol_or_fragment_metadata_by_default():
     chunk = make_chunk()
     assert chunk.symbol_name is None
     assert chunk.qualified_name is None
     assert chunk.parent_class is None
-    assert chunk.heading is None
-    assert chunk.line_fragment is False
+    assert chunk.fragment_index is None and chunk.fragment_count is None
+    assert chunk.is_fragment is False
+
+
+def test_valid_fragment():
+    chunk = make_chunk(fragment_index=1, fragment_count=3)
+    assert chunk.is_fragment is True
 
 
 def test_content_is_not_in_repr():
@@ -46,9 +53,14 @@ def test_content_is_not_in_repr():
         {"file_path": "/etc/passwd"},
         {"file_path": "../escape.py"},
         {"chunk_id": "short"},
+        {"source_sha256": "xyz"},
         {"content_sha256": "0" * 64},  # does not match content
         {"chunk_index": -1},
-        {"line_fragment": True, "start_line": 1, "end_line": 2},
+        {"chunking_version": 0},
+        {"fragment_index": 0},  # count missing
+        {"fragment_count": 2},  # index missing
+        {"fragment_index": 2, "fragment_count": 2},  # index out of range
+        {"fragment_index": 0, "fragment_count": 2, "start_line": 1, "end_line": 2},
     ],
 )
 def test_invalid_chunks_are_rejected(overrides):
@@ -59,28 +71,3 @@ def test_invalid_chunks_are_rejected(overrides):
 def test_chunk_is_immutable():
     with pytest.raises(ValidationError):
         make_chunk().start_line = 2
-
-
-def test_chunk_id_is_deterministic_and_sensitive_to_every_field():
-    base = {
-        "repository_name": "r",
-        "chunking_strategy": "line",
-        "file_path": "a.py",
-        "chunk_index": 0,
-        "start_line": 1,
-        "end_line": 2,
-        "content_sha256": "0" * 64,
-    }
-    first = make_chunk_id(**base)
-    assert first == make_chunk_id(**base)
-    assert len(first) == 16
-    for key, other in [
-        ("repository_name", "r2"),
-        ("chunking_strategy", "ast"),
-        ("file_path", "b.py"),
-        ("chunk_index", 1),
-        ("start_line", 2),
-        ("end_line", 3),
-        ("content_sha256", "1" * 64),
-    ]:
-        assert make_chunk_id(**{**base, key: other}) != first, key

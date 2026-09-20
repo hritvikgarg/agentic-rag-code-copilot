@@ -1,23 +1,30 @@
-"""Line-window splitting: the core algorithm of the baseline chunking strategy.
+"""Line-window splitting: the core algorithm of the baseline chunking strategy (Strategy A).
 
-**What:** cut a sequence of lines into overlapping windows of at most ``size`` lines and at most
-``max_tokens`` estimated tokens.
-**Why:** an embedding model only accepts a bounded amount of text and one vector per chunk must
-describe a small enough region to be retrievable. Overlap keeps a statement that straddles a
-boundary intact in at least one chunk.
-**Baseline caveat (the point of the experiment):** windows know nothing about program structure,
-so a function can be cut in half. Structure-aware chunking (Milestone 9) is the comparison.
+Applies identically to every supported text file (source code, Markdown, JSON, YAML). It never
+looks at language, syntax or document structure.
+
+**Primary boundary:** a configurable window of ``size`` lines, advancing so that consecutive
+windows share ``overlap`` lines.
+**Safety boundary:** the estimated token count (``copilot.utils.tokens.estimate_tokens``) may
+*shorten* a window so it stays within ``max_tokens`` before embedding. It only counts tokens; it
+does not inspect structure. The estimate is provisional: it is not checked against the real
+embedding tokenizer until Milestone 4.
 
 Rules:
 
 1. A window starts at line ``start`` and takes up to ``size`` lines; if that exceeds
-   ``max_tokens`` it is shortened (never truncated mid-line).
+   ``max_tokens`` it is shortened to the longest run of whole lines that fits.
 2. The next window starts ``overlap`` lines before the previous end, but always after the previous
    start, and only windows that add at least one not-yet-covered line are emitted (so a cap-shrunk
    window never produces a cascade of near-duplicates).
-3. A single line longer than ``max_tokens`` is split into contiguous fragments on token
-   boundaries; concatenating the fragments reproduces the line exactly.
+3. A single physical line longer than ``max_tokens`` cannot be shortened by removing lines, so it
+   is split deterministically into contiguous *fragments* on token boundaries (concatenating them
+   reproduces the line exactly). Every fragment keeps that line's own number; a fragment is not a
+   new source line.
 4. Whitespace-only windows are dropped (nothing to embed or retrieve).
+
+The baseline caveat is the point of the experiment: windows know nothing about program structure,
+so a function can be cut in half. Structure-aware chunking (Milestone 9) is the comparison.
 """
 
 from __future__ import annotations
@@ -35,7 +42,11 @@ class Window:
     start_line: int
     end_line: int
     content: str
-    fragment: bool = False  # True when ``content`` is a piece of a single over-long line
+    # Both None for a window of whole lines. For a piece of one over-long physical line both are
+    # set: this is piece ``fragment_index`` (0-based) of ``fragment_count``, and
+    # ``start_line == end_line`` is that line's own number (a fragment is not a new source line).
+    fragment_index: int | None = None
+    fragment_count: int | None = None
 
 
 def split_lines(text: str) -> list[str]:
@@ -88,9 +99,10 @@ def split_into_windows(
     while start < n:
         if counts[start] > max_tokens:
             line_no = first_line_number + start
+            pieces = split_long_line(lines[start], max_tokens)
             windows.extend(
-                Window(line_no, line_no, piece, fragment=True)
-                for piece in split_long_line(lines[start], max_tokens)
+                Window(line_no, line_no, piece, fragment_index=k, fragment_count=len(pieces))
+                for k, piece in enumerate(pieces)
             )
             covered = max(covered, start + 1)
             start += 1

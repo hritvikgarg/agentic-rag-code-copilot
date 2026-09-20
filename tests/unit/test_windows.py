@@ -109,23 +109,27 @@ class TestTokenCap:
     def test_giant_line_between_normal_lines_causes_no_duplicate_cascade(self):
         lines = numbered(30) + ["x " * 200] + numbered(5)  # line 31 is far over the cap
         windows = split_into_windows(lines, size=10, overlap=4, max_tokens=30)
-        whole = [(w.start_line, w.end_line) for w in windows if not w.fragment]
+        whole = [(w.start_line, w.end_line) for w in windows if w.fragment_index is None]
         for i, (a1, b1) in enumerate(whole):
             for j, (a2, b2) in enumerate(whole):
                 assert i == j or not (a2 <= a1 and b1 <= b2)
-        assert all(w.start_line == w.end_line == 31 for w in windows if w.fragment)
-        assert any(w.fragment for w in windows)
+        assert all(
+            w.start_line == w.end_line == 31 for w in windows if w.fragment_index is not None
+        )
+        assert any(w.fragment_index is not None for w in windows)
 
     def test_long_line_is_split_into_fragments_that_reassemble(self):
         line = "    data = [" + ", ".join(str(i) for i in range(400)) + "]"
         windows = split_into_windows(
             ["before = 1", line, "after = 2"], size=10, overlap=2, max_tokens=50
         )
-        fragments = [w for w in windows if w.fragment]
+        fragments = [w for w in windows if w.fragment_index is not None]
         assert len(fragments) > 1
         assert "".join(w.content for w in fragments) == line
         assert all(estimate_tokens(w.content) <= 50 for w in windows)
         assert all(w.start_line == w.end_line == 2 for w in fragments)
+        assert [w.fragment_index for w in fragments] == list(range(len(fragments)))
+        assert {w.fragment_count for w in fragments} == {len(fragments)}
 
     def test_split_long_line_pieces_respect_cap_and_reassemble(self):
         line = "  " + "abc def(x, y) " * 100

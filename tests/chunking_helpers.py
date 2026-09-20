@@ -41,24 +41,28 @@ def assert_chunk_invariants(file: SourceFile, chunks: list[Chunk], *, max_tokens
         assert c.repository_name == file.repository_name
         assert c.language == file.language
         assert 1 <= c.start_line <= c.end_line <= len(lines)
+        assert c.source_sha256 == file.sha256
         assert 0 <= c.token_estimate <= max_tokens
         assert c.content.strip() != ""
-        if c.line_fragment:
-            assert c.start_line == c.end_line
+        if c.is_fragment:
+            assert c.start_line == c.end_line  # a fragment keeps its physical line number
+            assert 0 <= c.fragment_index < c.fragment_count
             assert c.content in lines[c.start_line - 1]
         else:
             assert c.content == "\n".join(lines[c.start_line - 1 : c.end_line])
 
     # fragments of one line reassemble to exactly that line
-    by_line: dict[int, list[str]] = {}
+    by_line: dict[int, list] = {}
     for c in chunks:
-        if c.line_fragment:
-            by_line.setdefault(c.start_line, []).append(c.content)
+        if c.is_fragment:
+            by_line.setdefault(c.start_line, []).append(c)
     for line_no, pieces in by_line.items():
-        assert "".join(pieces) == lines[line_no - 1]
+        assert [c.fragment_index for c in pieces] == list(range(len(pieces)))
+        assert {c.fragment_count for c in pieces} == {len(pieces)}
+        assert "".join(c.content for c in pieces) == lines[line_no - 1]
 
     # no whole-line window is contained in another (no near-duplicate cascade)
-    windows = [(c.start_line, c.end_line) for c in chunks if not c.line_fragment]
+    windows = [(c.start_line, c.end_line) for c in chunks if not c.is_fragment]
     for i, (a1, b1) in enumerate(windows):
         for j, (a2, b2) in enumerate(windows):
             assert i == j or not (a2 <= a1 and b1 <= b2), (windows[i], windows[j])
