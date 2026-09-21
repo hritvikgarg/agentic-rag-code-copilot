@@ -130,7 +130,10 @@ report = assert_safe_for_external_llm(chunks_and_user_text)  # raises if anythin
   safe `SecretScanReport` as `.report`.
 * **There is no bypass:** no `force` argument, setting or environment variable. A caller that fails the
   gate must not call the LLM.
-* Milestone 6 must call the gate on the *exact* context it builds, immediately before the API call.
+* Wiring (Milestone 6): `copilot.llm.GuardedLLMClient` calls the gate on the exact outbound strings
+  (system instruction and user prompt, i.e. the question and the retrieved chunks) immediately
+  before delegating to the provider client; if the gate raises, the provider client is never entered.
+  The plain baseline is covered the same way. See [`llm.md`](llm.md).
 
 ## CLI
 

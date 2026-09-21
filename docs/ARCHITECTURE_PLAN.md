@@ -252,11 +252,11 @@ Rules that apply to every milestone: implement only that milestone; run its test
 - **NEXT:** the content-based secret scanner gate (amendment 10) is delivered in Milestone 5c; Milestone 6 must wire it in before any external LLM call.
 
 ### Milestone 5c — Content-secret scanner and external-LLM gate (as delivered)
-- **STATUS:** Implemented and tested (`copilot.security`, `docs/security.md`). This is the mandatory gate of amendment 10. **It is implemented but not yet wired into any LLM call, because no external LLM path exists.** Milestone 6 must call `assert_safe_for_external_llm(...)` on the exact context (retrieved chunks plus user text) immediately before any external call.
+- **STATUS:** Implemented and tested (`copilot.security`, `docs/security.md`). This is the mandatory gate of amendment 10. It was wired into every hosted-LLM call in Milestone 6 (`GuardedLLMClient`).
 - **WHAT WAS BUILT:** typed findings (rule id, severity, relative path, line, column, static reason, masked preview; never the value), 16 rules (private-key block/header, provider token formats, bearer, URL credentials, secret-like assignments with entropy), placeholder/reference/hash/UUID false-positive handling, deterministic ordering, `scan_text/scan_source_file/scan_targets/scan_repository`, the fail-closed gate with `RepositorySecretRiskError` (no bypass argument), and `python -m copilot.security scan` reusing safe ingestion (exit 0/1/2).
 - **EVIDENCE:** self-scan of this repository: 0 findings; a scan of 2,673 third-party files gave 10 findings, all documentation examples (limited evidence; recall was not measured).
 - **LIMITATIONS:** pattern-based; obfuscated, split or short secrets and unquoted non-YAML assignments are missed; Git history is not scanned; documentation examples that look real are blocked (fail closed); no allowlist by design.
-- **NEXT:** Milestone 6 may start; the wiring of the gate is part of Milestone 6's acceptance.
+- **NEXT:** Milestone 6 (delivered; the gate is wired, see below).
 
 ### Milestone 5 (original numbering) — Semantic retrieval + benchmark v0 (partly superseded by 5b above)
 - **STATUS:** Semantic part delivered as Milestone 5b; the lexical and hybrid retrievers below remain not started. Later milestone numbers are not renumbered here; the LLM gate (amendment 10) is attached to "the first external-LLM call", whatever its number.
@@ -266,7 +266,14 @@ Rules that apply to every milestone: implement only that milestone; run its test
 - **TESTS:** Retrieval on fixture repo returns the planted file for planted queries; scores sorted; k larger than corpus; BM25 tokenizer splits `getUserById` and `get_user_by_id`; metric functions on hand-computed toy cases; RRF on hand-computed ranks.
 - **ACCEPTANCE:** One command prints Hit@k/MRR for dense, BM25 and hybrid on the v0 benchmark, with question counts. **These are real measurements, whatever they turn out to be.**
 
-### Milestone 6 — Basic repository-aware RAG (+ plain-LLM baseline)
+### Milestone 6 — Basic repository-aware RAG + plain-LLM baseline (as delivered)
+- **STATUS:** Implemented and tested with fake clients (`copilot.llm`, `copilot.rag`, `copilot.evaluation.comparison`; `docs/llm.md`, `docs/rag.md`, `docs/evaluation.md`). Live Gemini behaviour is verified manually with opt-in commands; no plain-vs-RAG results have been collected or claimed.
+- **WHAT WAS BUILT:** `LLMClient` protocol, `FakeLLMClient`, `GeminiLLMClient` (`google-genai`, model from `COPILOT_LLM_MODEL`, no default model id), typed secret-safe errors, `GuardedLLMClient` (the secret gate on the exact outbound text immediately before every provider call; services always wrap the client; no bypass); `answer_plain`; `RagService`/`answer_with_rag` (retrieve, deterministic bounded context with `BEGIN/END SOURCE n [tag]` blocks, `insufficient_evidence` on structural conditions, retrieval-derived citations); versioned prompts `plain-v1`/`rag-v1`; `python -m copilot.rag {ask,plain}`; `python -m copilot.evaluation {compare,summarize}` with a manual rubric (no LLM judge).
+- **DEVIATIONS FROM THE ORIGINAL PLAN BELOW:** no `OllamaClient`, response cache, JSON-schema answer or repair retry (unneeded for the baseline); the answer is free text with `[Source n]` labels and citations come from retrieval metadata, so a model cannot invent an authoritative citation; the plain baseline has no abstention instruction (a documented fairness choice; a prompt-only honest baseline remains a possible ablation).
+- **LIMITATIONS:** the model can ignore the grounding instructions; a citation means "given as evidence", not "supports the claim"; no similarity threshold for abstention (none is justified yet); quality is bounded by retrieval (Hit@1 47% on the self-authored benchmark).
+- **NEXT:** Milestone 7 (Streamlit MVP) or first collecting the plain-vs-RAG ratings, at the user's choice.
+
+#### Original Milestone 6 plan (superseded in detail by the delivered summary above)
 - **OBJECTIVE:** Grounded answers with resolvable citations, and the baseline we will compare against.
 - **WHAT WILL BE BUILT:** `LLMClient` protocol; `GeminiClient` (google-genai), `OllamaClient`, `FakeLLM`; response cache; context builder (chunks labelled `[C1]..`, token budget, dedup/merge of adjacent chunks); prompt requiring JSON `{answer, citations, evidence_sufficient, missing_information}`; citation resolver (chunk ID → file, symbol, lines); insufficient-evidence path; `plain_baseline.py` (same LLM, no retrieval, same output schema); CLI `scripts/ask.py`. Final Gemini model chosen here after you check AI Studio quotas.
 - **KEY FILES:** `llm/*`, `rag/{prompts,context_builder,generator,citations,pipeline,plain_baseline}.py`.

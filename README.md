@@ -87,11 +87,16 @@ agentic-rag-code-copilot/
 │   ├── embeddings/         # IMPLEMENTED: Embedder interface, fastembed adapter, token validation
 │   ├── utils/              # IMPLEMENTED: safe path helpers, token estimate
 │   ├── vectorstore/        # IMPLEMENTED: FAISS index, manifest, fingerprint, atomic save, CLI
-│   ├── parsing/ retrieval/ llm/ rag/ agents/
-│   │   evaluation/ services/
+│   ├── retrieval/          # IMPLEMENTED: semantic retrieval, hash-verified source, CLI
+│   ├── evaluation/         # IMPLEMENTED: retrieval benchmark/metrics, plain-vs-RAG comparison
+│   ├── security/           # IMPLEMENTED: content-secret scanner, external-LLM gate, CLI
+│   ├── llm/                # IMPLEMENTED: LLMClient, Gemini, fake, guarded client (Milestone 6)
+│   ├── rag/                # IMPLEMENTED: plain baseline, context, citations, RagService, CLI
+│   ├── parsing/ agents/ services/
 │   │                       # PLANNED: currently docstring-only packages
 ├── tests/                  # unit/ integration/ security/ + fixtures/ (synthetic repository builder)
-├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md, chunking.md, embeddings.md, vector-index.md
+├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md, chunking.md, embeddings.md, vector-index.md,
+│                           # retrieval.md, evaluation.md, security.md, llm.md, rag.md
 └── data/                   # local runtime data; contents are git-ignored
 ```
 
@@ -100,7 +105,7 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
 
 ## Current implementation status
 
-**Implemented now (Milestones 1-5c)**
+**Implemented now (Milestones 1-6)**
 
 - Project packaging and dependency configuration (`pyproject.toml`).
 - Typed configuration with validation and safe defaults (`copilot.config.Settings`).
@@ -160,17 +165,33 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   Findings carry only safe metadata (rule, relative path, line, column, masked preview); the value is
   never stored, logged or raised. `assert_safe_for_external_llm(...)` raises
   `RepositorySecretRiskError` on any finding and has **no bypass**. CLI: `python -m copilot.security
-  scan PATH` (exit 0 clean, 1 findings, 2 error/incomplete). **No external LLM exists yet, so the gate
-  is not wired into any LLM call; Milestone 6 must call it before sending repository text.** It reduces
-  risk but cannot guarantee that every secret is found. Details, rules and limitations:
-  [`docs/security.md`](docs/security.md).
+  scan PATH` (exit 0 clean, 1 findings, 2 error/incomplete). Since Milestone 6 the gate sits
+  immediately before every hosted-LLM request. It reduces risk but cannot guarantee that every
+  secret is found. Details, rules and limitations: [`docs/security.md`](docs/security.md).
+- **LLM layer** (`copilot.llm`, Milestone 6): a small `LLMClient` interface, a deterministic
+  `FakeLLMClient` for tests, a Google Gemini client (official `google-genai` SDK; the model id comes
+  from `COPILOT_LLM_MODEL` and **no default model is shipped**), typed secret-safe errors, and
+  `GuardedLLMClient`, the single choke point that runs the secret gate on the exact outbound text
+  before any provider call (no bypass flag). Details: [`docs/llm.md`](docs/llm.md).
+- **Basic RAG and plain-LLM baseline** (`copilot.rag`, Milestone 6): `answer_plain` (question only,
+  no repository) and `answer_with_rag` (semantic retrieval -> deterministic bounded context ->
+  secret gate -> grounded prompt -> answer with retrieval-derived `file:start-end` citations, and an
+  explicit `insufficient_evidence` status without calling the model when nothing usable was
+  retrieved). CLI: `python -m copilot.rag ask INDEX_DIR --repo PATH "question"` and
+  `python -m copilot.rag plain "question"`. **Not measured yet: no claim is made that RAG answers
+  are better than plain ones.** Details: [`docs/rag.md`](docs/rag.md).
+- **Plain-vs-RAG comparison framework** (`copilot.evaluation.comparison`): `python -m
+  copilot.evaluation compare` collects paired answers, evidence, citations, status and latency for a
+  subset of the benchmark, and `summarize` aggregates *manual* rubric ratings (correctness,
+  citation correctness, hallucinated claims, completeness, abstention). The LLM is not used as a
+  judge. No results exist yet. Plan and limits: [`docs/evaluation.md`](docs/evaluation.md).
 - Unit, integration and security tests for the above (run against synthetic repositories).
 
 **Planned (not implemented; do not expect these to work)**
 
-RAG answers, citations in generated answers, lexical/hybrid retrieval, Streamlit UI, LangGraph
-workflow, structure-aware chunking, debugging assistance, the plain-LLM comparison, and an
-evaluation on an independent repository.
+Measured plain-vs-RAG results (the framework exists, the ratings do not), lexical/hybrid retrieval,
+Streamlit UI, LangGraph workflow, structure-aware chunking, debugging assistance, and an evaluation
+on an independent repository.
 
 ## Setup (current milestone)
 
@@ -259,8 +280,9 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | 4 | Embedding service and tokenizer validation | **Done (validated on Windows)** |
 | 5a | FAISS vector index | **Done (validated on Windows)** |
 | 5b | Semantic retrieval and retrieval evaluation | **Done (matrix run on Windows; results in `docs/evaluation.md`)** |
-| 5c | Content-secret scanner and external-LLM gate | **Done (gate not yet wired: no LLM path)** |
-| 6-7 | Basic RAG, Streamlit MVP | Planned |
+| 5c | Content-secret scanner and external-LLM gate | **Done** |
+| 6 | Basic RAG + plain-LLM baseline + comparison framework | **Done (unit-tested with fakes; live verification is manual; results not yet measured)** |
+| 7 | Streamlit MVP | Planned |
 | 8-11 | LangGraph, structure-aware chunking, two experiments | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |
 
@@ -272,11 +294,13 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 - Ingestion skips sensitive file *names* (`.env*`, keys, credential files), binaries, oversized
   files and unsafe paths, and never follows symlinks. Filename filtering alone cannot see a key
   pasted into an ordinary source file, so a **content scanner** (`copilot.security`, Milestone 5c)
-  inspects file text, and its fail-closed gate `assert_safe_for_external_llm` **must be called before
-  any repository context is sent to an external LLM (Milestone 6)**. It is not wired into an LLM path
-  yet because none exists, and it cannot guarantee that every secret is found.
-- When the LLM is used, retrieved repository text is sent to an external API. Only index public
-  or your own repositories when using a hosted provider.
+  inspects file text, and its fail-closed gate `assert_safe_for_external_llm` runs immediately before
+  every hosted-LLM request (`GuardedLLMClient`, no bypass). It cannot guarantee that every secret
+  is found.
+- `python -m copilot.rag ask` and `plain`, and `python -m copilot.evaluation compare`, send the
+  question (and, for RAG, retrieved repository chunks) to the configured hosted provider. Only
+  index public or your own repositories when using a hosted provider. The API key is read from
+  `GEMINI_API_KEY`, is never printed or logged, and provider error text is never shown.
 - The project never executes code from an indexed repository.
 
 ## License

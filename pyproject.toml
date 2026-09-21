@@ -9,6 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
     "faiss-cpu>=1.15,<2",
     "fastembed>=0.8,<0.9",
+    "google-genai>=2.24.0",
     "numpy>=1.26",
     "pydantic-settings>=2.4",
 ]
@@ -34,6 +35,7 @@ addopts = "-ra --strict-markers"
 markers = [
     "slow: slow tests (e.g. building a real index); skipped in fast runs",
     "live: needs real models or network/API access; never run in CI",
+    "llm_live: calls the hosted LLM (opt-in: COPILOT_RUN_LLM_LIVE=1 plus model and key); never CI",
 ]
 
 [tool.ruff]

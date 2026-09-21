@@ -215,3 +215,73 @@ process was killed by the operating system, which is why the reported matrix was
 
 Use the same `--ignore-dir` values as recorded in the `.meta.json` (they are the defaults). Reported
 timings depend on hardware and are informative only.
+
+
+# Plain LLM vs repository-aware RAG (Milestone 6)
+
+Status: **the comparison framework is implemented and tested with fake models. No plain-vs-RAG
+results exist yet and none are claimed.** A real run needs a hosted model, and quality judgements
+need a human reader.
+
+## Question being asked
+
+Given the same LLM, the same generation settings and the same questions, does giving the model
+retrieved repository evidence (RAG, `rag-v1`) change the correctness, grounding, citation accuracy
+and hallucination behaviour compared with sending the bare question (plain, `plain-v1`)?
+
+## Design
+
+* Questions: a small subset of the existing 34-question benchmark
+  (`--limit N` = the first N, or `--question-id ID` repeated). Its limits apply in full: self-authored,
+  not independent, small, and the plain model may have seen this project's public code.
+* Both systems use the same client, model, temperature and token cap. Both go through the secret gate.
+* Everything about answer *quality* is a **human judgement**. The LLM is not used as a judge, because
+  a judge from the same model family can share the answerer's blind spots and hallucinations.
+* The only automatic measurement is objective: whether an included source overlaps a ground-truth
+  region (`first_relevant_source`), reusing the retrieval match rule. It says nothing about the answer.
+* Rated entries only are aggregated; the summary states how many were rated and declares no winner.
+
+## Workflow
+
+```powershell
+# 1. verify the benchmark against the repository (no LLM)
+uv run python -m copilot.evaluation verify benchmarks\copilot_self_055a8d5.jsonl --repo .
+# 2. collect paired answers for a subset (calls the hosted model after the secret gate)
+uv run python -m copilot.evaluation compare benchmarks\copilot_self_055a8d5.jsonl --repo . `
+    --index data\indexes\<index id> --limit 8 --delay-seconds 2 --output data\evaluation\compare-8.json
+# 3. open the JSON, read each answer against the source at the pinned commit, fill in the ratings
+# 4. aggregate what was rated
+uv run python -m copilot.evaluation summarize data\evaluation\compare-8.json
+```
+
+`data/` is git-ignored: comparison files contain model answers about repository code and are not
+committed. Each question is recorded with: the question, expected regions, the plain answer (or
+error), the RAG status/answer/sources/cited and unknown source numbers/retrieval and total latency,
+and empty `plain_rating` / `rag_rating` slots. A provider error or gate refusal on one question is
+recorded and the run continues.
+
+## Manual rubric (`answer-comparison/1`, also embedded in every file)
+
+| Dimension | Scale | Meaning |
+|---|---|---|
+| `grounded_correctness` | 0-2 | Repository-specific claims checked against the source at the pinned commit: 0 mostly wrong/unsupported, 1 partly correct or vague, 2 correct and specific. |
+| `citation_correctness` | 0-2, RAG only | Open each cited `file:lines`: 0 none support the claims, 1 some do, 2 all do. Leave null for plain. |
+| `hallucinated_claims` | integer >= 0 | Count of distinct invented repository facts (files, functions, classes, parameters, line numbers). General programming knowledge does not count. |
+| `completeness` | 0-2 | 0 misses the question, 1 partial, 2 covers what the reference regions show. |
+| `appropriate_abstention` | true/false/null | true: it declined and the evidence really was missing (or the question is unanswerable); false: it declined despite available evidence, or answered confidently without support; null: not applicable. |
+
+Rate blind if possible (hide which system produced which answer) and let a second person rate a
+sample; with one rater and a few questions, treat the numbers as anecdotal. Because every
+question in this benchmark has an answer in the repository, `appropriate_abstention` will rarely
+apply; abstention is better tested with a few deliberately unanswerable questions, which do not
+exist yet.
+
+## What this experiment can and cannot show
+
+* It can show, on a handful of questions, whether RAG answers cite real files and avoid invented
+  ones more often than plain answers, and where RAG fails (retrieval missed the target).
+* It cannot show significance (small n, one rater, non-independent benchmark, non-deterministic
+  models), generalisation to other repositories, or the benefit of RAG over a prompt-only honest
+  baseline (not run; the plain prompt has no abstention instruction).
+* A low RAG score with `first_relevant_source = null` is a *retrieval* failure, not necessarily a
+  generation failure; report the two separately.

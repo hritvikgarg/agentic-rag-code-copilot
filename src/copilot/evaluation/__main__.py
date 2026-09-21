@@ -5,6 +5,10 @@
   human has checked the regions.
 * ``run BENCH --repo PATH --index INDEX_DIR``: score an existing index.
 * ``matrix BENCH --repo PATH``: build one index per (chunk cap x text style) and score each.
+* ``compare BENCH --repo PATH --index INDEX_DIR --output FILE``: (Milestone 6) ask a subset of
+  questions through the plain LLM and through RAG and write the paired answers for manual rating.
+  This calls the hosted model (after the secret gate) and needs COPILOT_LLM_MODEL + GEMINI_API_KEY.
+* ``summarize FILE``: aggregate the human ratings entered in a comparison file.
 
 Output contains repository-relative paths and numbers only. The embedding model is local.
 """
@@ -28,6 +32,14 @@ from copilot.evaluation.benchmark import (
     load_benchmark,
     seal_regions,
 )
+from copilot.evaluation.comparison import (
+    format_summary,
+    load_comparison,
+    run_comparison,
+    select_questions,
+    summarize_ratings,
+    write_comparison,
+)
 from copilot.evaluation.metrics import DEFAULT_KS
 from copilot.evaluation.runner import (
     DEFAULT_CAPS,
@@ -40,8 +52,10 @@ from copilot.evaluation.runner import (
 )
 from copilot.ingestion import IngestionPolicy, ingest_repository
 from copilot.ingestion.errors import IngestionError
+from copilot.llm import LLMError, create_llm_client
 from copilot.retrieval import Retriever
 from copilot.retrieval.errors import RetrievalError
+from copilot.security import SecurityError
 from copilot.vectorstore.errors import VectorStoreError
 
 
@@ -145,6 +159,60 @@ def _cmd_matrix(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def _cmd_compare(args: argparse.Namespace, settings: Settings) -> int:
+    benchmark = load_benchmark(args.benchmark)
+    ignore = _ignore_dirs(args, benchmark)
+    verify_benchmark(
+        benchmark,
+        args.repo,
+        settings=settings,
+        ignore_directories=ignore,
+        repository_name=_repo_name(args, benchmark),
+    )
+    questions = select_questions(benchmark, args.question_id, args.limit)
+    llm = create_llm_client(settings)
+    retriever = Retriever.open(
+        args.index,
+        args.repo,
+        embedder=create_embedder(settings),
+        settings=settings,
+        ignore_directories=ignore,
+    )
+    print(
+        f"note: {len(questions)} questions x 2 requests are sent to {llm.provider}/{llm.model} "
+        "after the secret scan; retrieved repository chunks are part of the RAG requests.",
+        file=sys.stderr,
+    )
+    run = run_comparison(
+        questions,
+        retriever,
+        llm,
+        top_k=args.top_k,
+        settings=settings,
+        benchmark_name=benchmark.meta.name if benchmark.meta else None,
+        repository_name=retriever.index.spec.repository_name,
+        index_id=retriever.index.index_id,
+        delay_seconds=args.delay_seconds,
+        progress=lambda message: print(message, file=sys.stderr),
+    )
+    write_comparison(run, args.output)
+    errors = sum(1 for e in run.entries if e.plain.error or e.rag.error)
+    print(f"wrote {len(run.entries)} paired answers to {Path(args.output).name}")
+    if errors:
+        print(f"{errors} question(s) had an error; see the 'error' fields.", file=sys.stderr)
+    print(
+        "Nothing is rated yet. Fill in plain_rating / rag_rating per the rubric in the file, "
+        "then run: python -m copilot.evaluation summarize FILE"
+    )
+    return 0
+
+
+def _cmd_summarize(args: argparse.Namespace, settings: Settings) -> int:
+    del settings
+    print(format_summary(summarize_ratings(load_comparison(args.file))))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m copilot.evaluation", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -178,6 +246,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     matrix.add_argument("--depth", type=int, default=max(DEFAULT_KS), help="results per question")
 
+    compare = sub.add_parser("compare", help="plain LLM vs RAG on a question subset (hosted LLM)")
+    common(compare)
+    compare.add_argument("--index", required=True, help="index directory (data/indexes/<id>)")
+    compare.add_argument("--output", required=True, help="write the paired answers as JSON here")
+    compare.add_argument("--limit", type=int, help="use only the first N questions")
+    compare.add_argument(
+        "--question-id", action="append", default=[], help="use this question id (repeatable)"
+    )
+    compare.add_argument("--top-k", type=int, default=None, help="chunks per RAG question")
+    compare.add_argument(
+        "--delay-seconds", type=float, default=0.0, help="pause after each request (rate limits)"
+    )
+    summarize = sub.add_parser("summarize", help="aggregate the manual ratings in a compare file")
+    summarize.add_argument("file", help="a file written by 'compare'")
+
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -185,10 +268,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             reconfigure(errors="replace")
     setup_logging()
     settings = get_settings()
-    commands = {"verify": _cmd_verify, "seal": _cmd_seal, "run": _cmd_run, "matrix": _cmd_matrix}
+    commands = {
+        "verify": _cmd_verify,
+        "seal": _cmd_seal,
+        "run": _cmd_run,
+        "matrix": _cmd_matrix,
+        "compare": _cmd_compare,
+        "summarize": _cmd_summarize,
+    }
     try:
         return commands[args.command](args, settings)
     except (
+        SecurityError,
+        LLMError,
+        ValueError,
         BenchmarkFormatError,
         RetrievalError,
         VectorStoreError,

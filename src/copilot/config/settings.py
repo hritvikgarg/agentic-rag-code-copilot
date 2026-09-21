@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     # Deliberately unset: the concrete model ID is chosen and verified in Milestone 6 (against the
     # provider's current docs and the account's quota). No unverified ID is stored as a default.
     llm_model: str | None = Field(default=None, min_length=1)
+    # Conservative generation defaults (Milestone 6). temperature 0 keeps the plain-vs-RAG
+    # comparison as repeatable as the provider allows.
+    llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    llm_max_output_tokens: int = Field(default=1024, ge=16, le=65536)
+    llm_timeout_seconds: float = Field(default=60.0, gt=0.0, le=600.0)
+    # Budget for the repository evidence placed in one RAG prompt, in *estimated* tokens
+    # (the same heuristic as chunking). Whole evidence blocks are dropped, never cut in half.
+    rag_context_max_tokens: int = Field(default=6000, ge=200, le=200_000)
     ollama_base_url: str = "http://localhost:11434"
     gemini_api_key: SecretStr | None = Field(
         default=None,

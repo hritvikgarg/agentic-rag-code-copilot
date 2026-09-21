@@ -29,13 +29,21 @@ def synthetic_repo(tmp_path: Path) -> Path:
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip tests marked ``live`` (they need the real embedding model) unless explicitly enabled.
+    """Skip opt-in tests unless explicitly enabled.
 
-    Enable with ``COPILOT_RUN_LIVE=1`` (the first run downloads the model, ~0.64 GB).
+    ``live`` (real embedding model): ``COPILOT_RUN_LIVE=1`` (the first run downloads ~0.64 GB).
+    ``llm_live`` (hosted LLM call): ``COPILOT_RUN_LLM_LIVE=1``; the test itself also needs
+    ``COPILOT_LLM_MODEL`` and ``GEMINI_API_KEY`` and skips with a clear reason without them.
     """
-    if os.environ.get("COPILOT_RUN_LIVE") == "1":
-        return
-    skip = pytest.mark.skip(reason="live test: set COPILOT_RUN_LIVE=1 to run (downloads the model)")
+    skip_live = pytest.mark.skip(
+        reason="live test: set COPILOT_RUN_LIVE=1 to run (downloads the model)"
+    )
+    skip_llm = pytest.mark.skip(
+        reason="hosted-LLM test: set COPILOT_RUN_LLM_LIVE=1 (plus COPILOT_LLM_MODEL and "
+        "GEMINI_API_KEY) to run"
+    )
     for item in items:
-        if "live" in item.keywords:
-            item.add_marker(skip)
+        if "live" in item.keywords and os.environ.get("COPILOT_RUN_LIVE") != "1":
+            item.add_marker(skip_live)
+        if "llm_live" in item.keywords and os.environ.get("COPILOT_RUN_LLM_LIVE") != "1":
+            item.add_marker(skip_llm)
