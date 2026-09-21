@@ -30,8 +30,11 @@ def test_the_services_and_factory_route_every_call_through_the_guard():
 
 
 def test_only_the_protocol_the_guard_gemini_and_fake_define_generate():
+    # .as_posix() keeps the comparison platform-independent: relative_to() renders native
+    # separators, so a bare str() would read "llm\\base.py" on Windows and fail here for a
+    # reason that has nothing to do with the isolation invariant being checked.
     implementers = sorted(
-        str(p.relative_to(SRC))
+        p.relative_to(SRC).as_posix()
         for p in SRC.rglob("*.py")
         if re.search(r"^\s+def generate\(self", p.read_text(), re.MULTILINE)
     )
