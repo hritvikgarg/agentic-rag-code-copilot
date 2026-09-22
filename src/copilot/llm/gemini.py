@@ -5,6 +5,16 @@ Verified against google-genai 2.24.0: ``genai.Client(api_key=..., http_options=H
 GenerateContentConfig(system_instruction=, temperature=, max_output_tokens=))``, ``response.text``,
 ``response.usage_metadata`` and ``response.candidates[0].finish_reason``.
 
+Some Gemini models think before answering. Their hidden "thought" tokens
+(``usage_metadata.thoughts_token_count``) are spent from the *same* ``max_output_tokens`` budget
+as the visible answer (Google's SDK docs: ``total_token_count`` = ``prompt_token_count`` +
+``candidates_token_count`` + ``tool_use_prompt_token_count`` + ``thoughts_token_count``), so a
+question that makes the model "think" a lot can leave little or no budget for visible text and
+finish with ``MAX_TOKENS`` even though ``candidates_token_count`` (``completion_tokens``) looks
+tiny. This client does not change that budget; it only surfaces the count via
+``LLMResponse.reasoning_tokens`` so the discrepancy is diagnosable instead of mysterious. See
+``docs/llm.md``.
+
 No model id is hard-coded: the model comes from ``COPILOT_LLM_MODEL``. The API key is held as a
 ``SecretStr`` and only unwrapped when the SDK client is created. Provider exceptions are mapped
 to typed errors with fixed messages and re-raised ``from None`` (the SDK's own message can echo
@@ -161,6 +171,8 @@ class GeminiLLMClient:
             prompt_tokens=_int_or_none(getattr(usage, "prompt_token_count", None)),
             completion_tokens=_int_or_none(getattr(usage, "candidates_token_count", None)),
             total_tokens=_int_or_none(getattr(usage, "total_token_count", None)),
+            # Hidden "thinking" tokens (thinking-enabled models only); see the module docstring.
+            reasoning_tokens=_int_or_none(getattr(usage, "thoughts_token_count", None)),
             latency_seconds=round(elapsed, 3),
         )
 

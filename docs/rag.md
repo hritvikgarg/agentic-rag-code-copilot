@@ -158,6 +158,75 @@ repository content contains a secret? Compare the SOURCES of each RAG answer wit
 know to be relevant, and read both answers against the source. Do not conclude which system is
 better from five questions.
 
+## Live smoke test (native Windows, 2026-09)
+
+**One qualitative run, five hand-picked questions, no scoring.** This is not the evaluation in
+[`evaluation.md`](evaluation.md) and proves nothing about RAG vs. plain in general; it only checks
+that the live path (real Gemini call, real index, real secret gate) works end to end and records
+what it produced, honestly, including a failure.
+
+Environment: native Windows, Python 3.12.5, `COPILOT_LLM_PROVIDER=gemini`, model `gemini-3.6-flash`
+(chosen and configured by the user; not a project default). Index: 416 chunks / 416 vectors,
+dimension 768, `jinaai/jina-embeddings-v2-base-code`, the project's default chunking (512-token
+cap) and embedding representation (`prefixed`) — **unchanged from the Milestone 5b default**; this
+run did not touch retrieval or chunking configuration.
+
+**Security gate:** ran successfully ahead of every one of the ten calls below (5 RAG + 5 plain);
+no call reached the model before the gate, consistent with the design in
+[`llm.md`](llm.md#security-gate-placement).
+
+| # | Question | Retrieval quality | Generation outcome | Plain baseline |
+|---|---|---|---|---|
+| 1 | How are chunk IDs generated? | Correct: chunking docs/code retrieved | Correct, complete (canonical JSON → SHA-256 → first 16 hex chars); finish `STOP`... *(see note below)* | Generic, no repository grounding (guessed at frontend bundlers) |
+| 2 | Where is unsafe repository path traversal rejected? | Correct: `paths.py`, `loader.py`, `discovery.py` | Correct, named the real functions (`validate_relative_posix`, `safe_join`, `is_within_root`, `relative_posix`, `resolve_repository_root`, discovery checks) | Generic Git/libgit2-level answer, no repository grounding |
+| 3 | How is the FAISS vector index persisted? | Correct: `faiss_backend.py`, `vectorstore/index.py`, `docs/vector-index.md` | **Truncated after ~one bullet** (see below) | not run for this table entry |
+| 4 | How is logging configured? | Correct: `logging_setup.py` | Correct (namespace, propagation, handlers, idempotency, formatting, secret redaction), **truncated near the end** | Generic logging-concepts answer, no repository grounding |
+| 5 | What happens when repository content contains a secret? | N/A (conceptual question about the scanner itself) | Correct and complete: scanner → typed finding → fail-closed gate → `RepositorySecretRiskError` → hosted call blocked; finish `STOP` | Generic secret-leak/hosting-policy answer, no repository grounding |
+
+Note on row 1: finish reason was reported as `MAX_TOKENS` even though the answer reads as complete;
+Gemini can report `MAX_TOKENS` when generation stopped at the configured cap regardless of whether
+the visible prose looks finished to a reader, so "the model was cut off" is not the same claim as
+"the answer is incomplete" — row 1's answer content was judged complete by inspection.
+
+Timing and token usage (retrieval is local; generation is the live Gemini call):
+
+| # | retrieval (s) | generation (s) | prompt tok | completion tok | total tok | finish |
+|---|---|---|---|---|---|---|
+| 1 | 0.021 | 8.945 | 3535 | 607 | 4748 | `MAX_TOKENS` |
+| 2 | 0.020 | 10.958 | 3079 | 461 | 4430 | `MAX_TOKENS` |
+| 3 | 0.026 | 8.648 | 3201 | 41 | 4221 | `MAX_TOKENS` |
+| 4 | 0.024 | 7.661 | 1873 | 459 | 2893 | `MAX_TOKENS` |
+| 5 | 0.022 | 8.800 | 2853 | 346 | 3772 | `STOP` |
+
+Retrieval finished in hundredths of a second in every case; all of the visible latency is the
+hosted Gemini call.
+
+### Q3 in detail: a generation/truncation failure, not a retrieval failure
+
+Retrieval for question 3 was accurate — it surfaced exactly the files that answer the question.
+What failed was generation: the reply stopped after essentially one bullet point. `completion_tokens`
+(41) looked implausibly small next to `total_tokens` (4221) for a `MAX_TOKENS` finish, which is
+what prompted the investigation recorded in [`llm.md`](llm.md#thinking-models-and-max_tokens-confirmed-on-a-live-gemini-call-see-below).
+The gap is accounted for: this model spends part of the shared `max_output_tokens` budget on hidden
+"thinking" tokens (`usage_metadata.thoughts_token_count`, now surfaced as `LLMResponse.reasoning_tokens`
+and shown by `rag ask --show-context`); for this call thinking consumed most of the 1024-token
+budget, leaving very little for the visible answer. This is recorded here as **a real, reproduced
+failure mode of the live system** (users can get a badly truncated answer to a well-retrieved
+question) — not explained away, and not fixed by changing retrieval, chunking or the default
+`max_output_tokens` in this task. See `llm.md` for what a user can do about it
+(raise `COPILOT_LLM_MAX_OUTPUT_TOKENS`; a `thinking_budget` setting is not implemented yet).
+
+### What this run does and does not show
+
+* It shows the live path works: gate → retrieval → context → Gemini → typed answer with citations,
+  and that the gate runs before every call, including the plain baseline's.
+* It shows one concrete generation failure mode (thinking-heavy truncation) worth knowing about
+  before relying on this system.
+* It does **not** compare RAG and plain systematically (five hand-picked questions, one run, no
+  rubric, no rater) and **no winner is declared**. The plain baseline's answers were, as expected,
+  generic and repository-blind on every question tried; that is consistent with it having no
+  repository context, not evidence that RAG is "better" overall.
+
 ## Limitations
 
 * Retrieval quality bounds answer quality: the chunker is structure-blind and retrieval is dense

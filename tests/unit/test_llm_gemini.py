@@ -41,12 +41,15 @@ class FakeSdk:
         return self._reply
 
 
-def reply(text="hello", finish="STOP", usage=(3, 4, 7), block=None):
+def reply(text="hello", finish="STOP", usage=(3, 4, 7), block=None, thoughts=None):
     return SimpleNamespace(
         text=text,
         candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name=finish))],
         usage_metadata=SimpleNamespace(
-            prompt_token_count=usage[0], candidates_token_count=usage[1], total_token_count=usage[2]
+            prompt_token_count=usage[0],
+            candidates_token_count=usage[1],
+            total_token_count=usage[2],
+            thoughts_token_count=thoughts,
         ),
         prompt_feedback=SimpleNamespace(block_reason=SimpleNamespace(name=block))
         if block
@@ -68,6 +71,7 @@ def test_a_normal_reply_becomes_a_typed_response_with_usage():
     assert (response.text, response.provider, response.model) == ("hello", "gemini", "model-x")
     assert response.finish_reason == "STOP"
     assert (response.prompt_tokens, response.completion_tokens, response.total_tokens) == (3, 4, 7)
+    assert response.reasoning_tokens is None  # not reported by this (non-thinking) reply
     call = sdk.calls[0]
     assert call["model"] == "model-x" and call["contents"] == "user"
     assert call["config"].system_instruction == "sys"
@@ -144,6 +148,44 @@ def test_a_max_tokens_empty_reply_explains_the_setting():
 def test_a_blocked_prompt_is_a_response_error():
     with pytest.raises(LLMResponseError, match="blocked"):
         client(FakeSdk(reply=reply(text=None, block="SAFETY"))).generate(request())
+
+
+def test_thinking_tokens_are_surfaced_as_reasoning_tokens():
+    # A "thinking" model can spend part of max_output_tokens on hidden thought tokens before
+    # producing any visible text; usage_metadata.thoughts_token_count carries that count.
+    response = client(FakeSdk(reply=reply(usage=(10, 5, 20), thoughts=5))).generate(request())
+    assert response.reasoning_tokens == 5
+    assert (response.prompt_tokens, response.completion_tokens, response.total_tokens) == (
+        10,
+        5,
+        20,
+    )
+
+
+def test_a_thinking_heavy_reply_is_returned_truncated_not_raised():
+    # Regression for the live Q3 anomaly: max_output_tokens is shared between hidden thinking
+    # and visible text, so a question that makes the model "think" a lot can leave only a few
+    # visible tokens and finish MAX_TOKENS, even though the reply is not empty. This is a
+    # truncated answer, not a client bug: the (non-empty) text is still returned, and
+    # reasoning_tokens explains where most of the token budget went.
+    response = client(
+        FakeSdk(
+            reply=reply(
+                text="- FAISS index is saved",
+                finish="MAX_TOKENS",
+                usage=(3201, 41, 4221),
+                thoughts=979,
+            )
+        )
+    ).generate(request())
+    assert response.text == "- FAISS index is saved"
+    assert response.finish_reason == "MAX_TOKENS"
+    assert (response.prompt_tokens, response.completion_tokens) == (3201, 41)
+    assert response.reasoning_tokens == 979
+    # accounted totals never exceed the provider's own total_token_count
+    assert response.prompt_tokens + response.completion_tokens + response.reasoning_tokens <= (
+        response.total_tokens
+    )
 
 
 def test_missing_usage_metadata_is_tolerated():

@@ -10,6 +10,7 @@ from copilot.llm import (
     LLMClient,
     LLMConfigurationError,
     LLMRequest,
+    LLMResponse,
     create_llm_client,
 )
 from copilot.security import RepositorySecretRiskError
@@ -45,6 +46,23 @@ def test_empty_prompt_parts_are_rejected(field):
 def test_request_is_frozen():
     with pytest.raises(ValidationError):
         request().user_prompt = "changed"  # type: ignore[misc]
+
+
+def _response(**overrides) -> LLMResponse:
+    values = {"text": "ok", "provider": "fake", "model": "m"}
+    values.update(overrides)
+    return LLMResponse(**values)
+
+
+def test_reasoning_tokens_defaults_to_none_and_is_provider_neutral():
+    # Not every provider/model reports hidden "thinking" tokens; absence must not be an error.
+    assert _response().reasoning_tokens is None
+    assert _response(reasoning_tokens=979).reasoning_tokens == 979
+
+
+def test_reasoning_tokens_rejects_negative_values():
+    with pytest.raises(ValidationError):
+        _response(reasoning_tokens=-1)
 
 
 def test_fake_client_is_deterministic_and_records_requests():

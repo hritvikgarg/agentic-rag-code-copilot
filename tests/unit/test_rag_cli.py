@@ -4,7 +4,7 @@ import pytest
 
 from copilot.config import Settings
 from copilot.embeddings import HashEmbedder
-from copilot.llm import FakeLLMClient, LLMAuthenticationError, LLMConfigurationError
+from copilot.llm import FakeLLMClient, LLMAuthenticationError, LLMConfigurationError, LLMResponse
 from copilot.rag import __main__ as cli
 from copilot.vectorstore import build_repository_index
 from tests.retrieval_helpers import write_repo
@@ -50,6 +50,36 @@ def test_ask_prints_the_answer_then_the_sources(capsys, fake, repo, index_dir):
     assert "note:" in err and "fake/fake-model" in err
     assert "def make_chunk_id" not in out  # no source dump by default
     assert fake.call_count == 1
+
+
+class ThinkingHeavyClient(FakeLLMClient):
+    """A fake client shaped like the live Q3 anomaly: mostly-thinking, truncated reply."""
+
+    def generate(self, request):
+        self.requests.append(request)
+        return LLMResponse(
+            text="- FAISS index is saved",
+            provider=self.provider,
+            model=self.model,
+            finish_reason="MAX_TOKENS",
+            prompt_tokens=3201,
+            completion_tokens=41,
+            total_tokens=4221,
+            reasoning_tokens=979,
+            latency_seconds=8.648,
+        )
+
+
+def test_show_context_surfaces_reasoning_tokens_and_a_truncation_warning(
+    capsys, monkeypatch, repo, index_dir
+):
+    monkeypatch.setattr(cli, "create_llm_client", lambda settings: ThinkingHeavyClient())
+    monkeypatch.setattr(cli, "create_embedder", lambda settings: HashEmbedder(dimension=64))
+    monkeypatch.setattr(cli, "setup_logging", lambda *a, **k: None)
+    code, out, _ = run(capsys, "ask", index_dir, "--repo", repo, "--show-context", QUESTION)
+    assert code == 0
+    assert "reasoning/thinking 979, not visible text" in out
+    assert "warning: the answer may be truncated (finish reason MAX_TOKENS)" in out
 
 
 def test_show_context_prints_metadata_only(capsys, fake, repo, index_dir):

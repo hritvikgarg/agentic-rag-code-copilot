@@ -29,6 +29,7 @@ class GenerationInfo(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    reasoning_tokens: int | None = None  # hidden "thinking" tokens, if the provider reports them
     latency_seconds: float | None = None
 
     @classmethod
@@ -40,6 +41,7 @@ class GenerationInfo(BaseModel):
             prompt_tokens=response.prompt_tokens,
             completion_tokens=response.completion_tokens,
             total_tokens=response.total_tokens,
+            reasoning_tokens=response.reasoning_tokens,
             latency_seconds=response.latency_seconds,
         )
 

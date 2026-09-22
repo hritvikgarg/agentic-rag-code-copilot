@@ -46,7 +46,16 @@ class LLMRequest(BaseModel):
 
 
 class LLMResponse(BaseModel):
-    """A provider's answer plus safe metadata."""
+    """A provider's answer plus safe metadata.
+
+    ``reasoning_tokens`` is provider-neutral: some providers spend part of the same generation
+    budget on hidden "thinking"/reasoning tokens that are never returned as text (Gemini's
+    ``usage_metadata.thoughts_token_count``; comparable fields exist for other reasoning-capable
+    models). When present, ``prompt_tokens + completion_tokens + reasoning_tokens`` can be less
+    than ``total_tokens`` if the provider also reports other categories (e.g. tool-use tokens);
+    it is diagnostic only and never required to be exact. It is ``None`` for a client that does
+    not report it (the fake client, or a provider/model without reasoning tokens).
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -57,4 +66,5 @@ class LLMResponse(BaseModel):
     prompt_tokens: int | None = Field(default=None, ge=0)
     completion_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
     latency_seconds: float | None = Field(default=None, ge=0.0)

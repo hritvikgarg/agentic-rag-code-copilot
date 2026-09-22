@@ -74,7 +74,18 @@ def format_rag_answer(answer: RagAnswer, *, show_context: bool = False) -> str:
             lines.append(
                 f"tokens: prompt {g.prompt_tokens} completion {g.completion_tokens} "
                 f"total {g.total_tokens}"
+                + (
+                    f" (of which reasoning/thinking {g.reasoning_tokens}, not visible text)"
+                    if g.reasoning_tokens
+                    else ""
+                )
             )
+            if g.finish_reason == "MAX_TOKENS":
+                lines.append(
+                    "warning: the answer may be truncated (finish reason MAX_TOKENS); if "
+                    "reasoning/thinking tokens are shown above, they consumed part of "
+                    "COPILOT_LLM_MAX_OUTPUT_TOKENS before any visible text was produced"
+                )
         lines.append(
             f"retrieval {answer.retrieval_seconds}s  generation {answer.generation_seconds}s"
         )

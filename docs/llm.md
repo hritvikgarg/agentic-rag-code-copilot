@@ -9,7 +9,7 @@ passes the content-secret gate first. It contains no retrieval or RAG logic.
 |---|---|
 | `LLMClient` (Protocol) | `provider`, `model`, `generate(request) -> LLMResponse`. Small on purpose; only Gemini is implemented, so there is no registry or plug-in machinery. |
 | `LLMRequest` | Frozen model of *exactly* what leaves the machine: `system_instruction`, `user_prompt`, `temperature`, `max_output_tokens`, `prompt_version`. `outbound_text()` returns the sent text; `scan_targets()` returns the same two strings for the gate. The texts are excluded from `repr`. |
-| `LLMResponse` | `text` (never empty), `provider`, `model`, `finish_reason`, token usage, `latency_seconds`. No request text, no credentials. |
+| `LLMResponse` | `text` (never empty), `provider`, `model`, `finish_reason`, token usage (`prompt_tokens`, `completion_tokens`, `total_tokens`, `reasoning_tokens`), `latency_seconds`. No request text, no credentials. |
 | `FakeLLMClient` | Deterministic, offline; records every request in `.requests`. Used by all normal tests. |
 | `GeminiLLMClient` | The hosted client (official `google-genai` SDK). |
 | `GuardedLLMClient` | Wraps any client; scans the exact outbound strings, then delegates. See below. |
@@ -67,9 +67,32 @@ for the Gemini API (<https://ai.google.dev/gemini-api/docs/models>) that your ke
 `COPILOT_LLM_MODEL` in `.env`, and check it works with the cheap smoke command in
 [`rag.md`](rag.md). An unknown model yields a clear `LLMConfigurationError` (HTTP 404 mapping).
 
-Note for "thinking" models: hidden reasoning tokens can consume `max_output_tokens` and yield an
-empty reply with finish reason `MAX_TOKENS`. The client reports that explicitly; raise
-`COPILOT_LLM_MAX_OUTPUT_TOKENS` if you see it.
+### Thinking models and `MAX_TOKENS` (confirmed on a live Gemini call, see below)
+
+Some Gemini models "think" before answering, and the hidden thought tokens are billed against the
+*same* `max_output_tokens` budget as the visible answer. Per the installed `google-genai` 2.24.0
+SDK's own field documentation, `usage_metadata.total_token_count` is the sum of
+`prompt_token_count` + `candidates_token_count` + `tool_use_prompt_token_count` +
+`thoughts_token_count`; `max_output_tokens` in `GenerateContentConfig` caps generation overall, and
+a `thinking_config` (`thinking_budget` / `thinking_level`) exists per-model to control how much of
+that budget the model may spend thinking, but this project does not set it and none is exposed as
+a setting yet. Consequences for this project:
+
+* A question that makes the model think a lot can leave few or zero tokens for the visible answer,
+  finishing with `MAX_TOKENS` even though `completion_tokens` (`candidates_token_count`, the
+  *visible* tokens) is small — the "missing" tokens went to thinking, not to a parsing error.
+* `LLMResponse.reasoning_tokens` (from `usage_metadata.thoughts_token_count`) makes this visible:
+  `prompt_tokens + completion_tokens + reasoning_tokens` approaches `total_tokens` when it is the
+  explanation. It is provider-neutral by name (other reasoning-capable providers report an
+  analogous count) and `None` when a provider/model does not report it; it changes no behaviour by
+  itself. `python -m copilot.rag ask --show-context` and `GenerationInfo` surface it.
+* This is a **generation/truncation** condition, not a client bug: the (possibly very short, but
+  non-empty) visible text is still returned rather than raised as an error; only a *fully* empty
+  or blank reply raises `LLMResponseError`. If truncation is a problem in practice, raise
+  `COPILOT_LLM_MAX_OUTPUT_TOKENS`, since today the budget is shared with thinking and this project
+  does not configure `thinking_budget`.
+* A real Milestone 6 live run reproduced exactly this shape; see the Q3 entry in
+  [`rag.md`](rag.md#live-smoke-test-native-windows-2026-09) for the actual numbers.
 
 ## Errors
 
