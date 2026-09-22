@@ -1,4 +1,4 @@
-"""Evaluation commands: ``python -m copilot.evaluation {verify,seal,run,matrix}``.
+"""Evaluation commands: ``python -m copilot.evaluation {verify,seal,run,matrix,compare,summarize}``.
 
 * ``verify BENCH --repo PATH``: check every ground-truth region against the repository's text.
 * ``seal BENCH --repo PATH``: (maintainers) write each region's ``sha256`` into the file after a
@@ -8,6 +8,11 @@
 * ``compare BENCH --repo PATH --index INDEX_DIR --output FILE``: (Milestone 6) ask a subset of
   questions through the plain LLM and through RAG and write the paired answers for manual rating.
   This calls the hosted model (after the secret gate) and needs COPILOT_LLM_MODEL + GEMINI_API_KEY.
+  ``--resume`` continues an existing ``--output`` file: sides that already succeeded are reused
+  unchanged and only failed sides are retried; see ``docs/evaluation.md`` for the resume/retry
+  design and why it exists. Transient provider failures (HTTP 429/503) are retried automatically
+  under a bounded backoff (``--retry-*`` flags) independently of ``--delay-seconds`` (which paces
+  *every* request, successful or not).
 * ``summarize FILE``: aggregate the human ratings entered in a comparison file.
 
 Output contains repository-relative paths and numbers only. The embedding model is local.
@@ -33,6 +38,8 @@ from copilot.evaluation.benchmark import (
     seal_regions,
 )
 from copilot.evaluation.comparison import (
+    ComparisonEntry,
+    ComparisonRun,
     format_summary,
     load_comparison,
     run_comparison,
@@ -53,6 +60,13 @@ from copilot.evaluation.runner import (
 from copilot.ingestion import IngestionPolicy, ingest_repository
 from copilot.ingestion.errors import IngestionError
 from copilot.llm import LLMError, create_llm_client
+from copilot.llm.retry import (
+    DEFAULT_INITIAL_DELAY_SECONDS,
+    DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_MAX_DELAY_SECONDS,
+    DEFAULT_MULTIPLIER,
+    RetryPolicy,
+)
 from copilot.retrieval import Retriever
 from copilot.retrieval.errors import RetrievalError
 from copilot.security import SecurityError
@@ -159,6 +173,21 @@ def _cmd_matrix(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def _side_counts(
+    run: ComparisonRun, prior_by_id: dict[str, ComparisonEntry], side: str
+) -> tuple[int, int, int]:
+    """(successful, reused-from-existing-file, failed) for ``side`` ("plain" or "rag")."""
+    successful = sum(1 for e in run.entries if getattr(e, side).error is None)
+    reused = sum(
+        1
+        for e in run.entries
+        if (prior := prior_by_id.get(e.question_id)) is not None
+        and getattr(prior, side).error is None
+    )
+    failed = len(run.entries) - successful
+    return successful, reused, failed
+
+
 def _cmd_compare(args: argparse.Namespace, settings: Settings) -> int:
     benchmark = load_benchmark(args.benchmark)
     ignore = _ignore_dirs(args, benchmark)
@@ -178,30 +207,93 @@ def _cmd_compare(args: argparse.Namespace, settings: Settings) -> int:
         settings=settings,
         ignore_directories=ignore,
     )
+
+    output_path = Path(args.output)
+    resume_from = None
+    if args.resume:
+        if output_path.exists():
+            resume_from = load_comparison(output_path)
+            print(
+                f"--resume: found {len(resume_from.entries)} existing entries in "
+                f"{output_path.name}; only failed sides will be re-asked",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"--resume: {output_path.name} does not exist yet; starting a new run",
+                file=sys.stderr,
+            )
+
+    retry_policy = RetryPolicy(
+        initial_delay_seconds=args.retry_initial_delay,
+        multiplier=args.retry_multiplier,
+        max_delay_seconds=args.retry_max_delay,
+        max_attempts=args.retry_max_attempts,
+    )
+
     print(
         f"note: {len(questions)} questions x 2 requests are sent to {llm.provider}/{llm.model} "
-        "after the secret scan; retrieved repository chunks are part of the RAG requests.",
+        "after the secret scan; retrieved repository chunks are part of the RAG requests. "
+        f"transient failures (HTTP 429/503) retry up to {retry_policy.max_attempts} attempts "
+        f"({retry_policy.initial_delay_seconds:g}s.."
+        f"{retry_policy.max_delay_seconds:g}s backoff).",
         file=sys.stderr,
     )
-    run = run_comparison(
-        questions,
-        retriever,
-        llm,
-        top_k=args.top_k,
-        settings=settings,
-        benchmark_name=benchmark.meta.name if benchmark.meta else None,
-        repository_name=retriever.index.spec.repository_name,
-        index_id=retriever.index.index_id,
-        delay_seconds=args.delay_seconds,
-        progress=lambda message: print(message, file=sys.stderr),
-    )
-    write_comparison(run, args.output)
-    errors = sum(1 for e in run.entries if e.plain.error or e.rag.error)
-    print(f"wrote {len(run.entries)} paired answers to {Path(args.output).name}")
-    if errors:
-        print(f"{errors} question(s) had an error; see the 'error' fields.", file=sys.stderr)
+    try:
+        run = run_comparison(
+            questions,
+            retriever,
+            llm,
+            top_k=args.top_k,
+            settings=settings,
+            benchmark_name=benchmark.meta.name if benchmark.meta else None,
+            repository_name=retriever.index.spec.repository_name,
+            index_id=retriever.index.index_id,
+            delay_seconds=args.delay_seconds,
+            progress=lambda message: print(message, file=sys.stderr),
+            resume_from=resume_from,
+            retry_policy=retry_policy,
+            checkpoint_path=output_path,
+        )
+    except KeyboardInterrupt:
+        print(
+            f"\ninterrupted: the checkpoint through the last completed question is saved in "
+            f"{output_path.name}. Re-run with --resume to continue.",
+            file=sys.stderr,
+        )
+        return 130
+
+    write_comparison(run, output_path)  # final write; checkpoint_path already wrote every question
+
+    prior_by_id = {e.question_id: e for e in (resume_from.entries if resume_from else [])}
+    plain_ok, plain_reused, plain_failed = _side_counts(run, prior_by_id, "plain")
+    rag_ok, rag_reused, rag_failed = _side_counts(run, prior_by_id, "rag")
+    complete = plain_failed == 0 and rag_failed == 0
+
+    print(f"wrote {len(run.entries)} paired answers to {output_path.name}")
+    print(f"total questions: {len(run.entries)}")
     print(
-        "Nothing is rated yet. Fill in plain_rating / rag_rating per the rubric in the file, "
+        f"plain: {plain_ok} successful ({plain_reused} reused from the existing file), "
+        f"{plain_failed} failed"
+    )
+    print(
+        f"rag:   {rag_ok} successful ({rag_reused} reused from the existing file), "
+        f"{rag_failed} failed"
+    )
+    print(
+        "run complete: every question has both sides successful"
+        if complete
+        else "run INCOMPLETE: some question(s) still have a failed side after retries"
+    )
+    print(f"output: {output_path}")
+    if not complete:
+        print(
+            f"{plain_failed + rag_failed} side(s) had an error after retries; see the 'error' "
+            "fields. Re-run the same command with --resume to retry only those.",
+            file=sys.stderr,
+        )
+    print(
+        "Fill in plain_rating / rag_rating per the rubric in the file, "
         "then run: python -m copilot.evaluation summarize FILE"
     )
     return 0
@@ -256,7 +348,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     compare.add_argument("--top-k", type=int, default=None, help="chunks per RAG question")
     compare.add_argument(
-        "--delay-seconds", type=float, default=0.0, help="pause after each request (rate limits)"
+        "--delay-seconds",
+        type=float,
+        default=0.0,
+        help="pause after every request, success or failure (request pacing, not retry backoff)",
+    )
+    compare.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue an existing --output file: reuse successful sides, retry only failed ones",
+    )
+    compare.add_argument(
+        "--retry-initial-delay",
+        type=float,
+        default=DEFAULT_INITIAL_DELAY_SECONDS,
+        help="backoff wait before the first retry of a transient failure, in seconds "
+        f"(default: {DEFAULT_INITIAL_DELAY_SECONDS:g})",
+    )
+    compare.add_argument(
+        "--retry-multiplier",
+        type=float,
+        default=DEFAULT_MULTIPLIER,
+        help=f"backoff growth factor per retry (default: {DEFAULT_MULTIPLIER:g})",
+    )
+    compare.add_argument(
+        "--retry-max-delay",
+        type=float,
+        default=DEFAULT_MAX_DELAY_SECONDS,
+        help=f"backoff wait cap, in seconds (default: {DEFAULT_MAX_DELAY_SECONDS:g})",
+    )
+    compare.add_argument(
+        "--retry-max-attempts",
+        type=int,
+        default=DEFAULT_MAX_ATTEMPTS,
+        help="attempts per side before giving up (1 = no retries; "
+        f"default: {DEFAULT_MAX_ATTEMPTS})",
     )
     summarize = sub.add_parser("summarize", help="aggregate the manual ratings in a compare file")
     summarize.add_argument("file", help="a file written by 'compare'")

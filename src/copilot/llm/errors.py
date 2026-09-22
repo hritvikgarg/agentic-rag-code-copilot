@@ -21,7 +21,16 @@ class LLMAuthenticationError(LLMError):
 
 
 class LLMRateLimitError(LLMError):
-    """The provider's rate or quota limit was hit (HTTP 429)."""
+    """The provider's rate or quota limit was hit (HTTP 429).
+
+    ``retry_after_seconds`` is the provider's own requested wait, read from a ``Retry-After``
+    response header when the SDK exposes one (``None`` otherwise - Gemini does not always send
+    it). It is a plain number of seconds, never request content, so it is always safe to log.
+    """
+
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 class LLMTimeoutError(LLMError):
@@ -33,11 +42,23 @@ class LLMConnectionError(LLMError):
 
 
 class LLMProviderError(LLMError):
-    """The provider failed or rejected the request for another reason."""
+    """The provider failed or rejected the request for another reason.
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    ``status_code`` is the HTTP status when known. Most causes here are not transient (a bad
+    request, an unexpected SDK failure), but HTTP 503 ("service unavailable") is - see
+    ``copilot.llm.retry.is_transient``. ``retry_after_seconds`` mirrors ``LLMRateLimitError``'s.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
 
 
 class LLMResponseError(LLMError):

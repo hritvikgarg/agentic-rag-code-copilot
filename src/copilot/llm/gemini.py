@@ -19,6 +19,14 @@ No model id is hard-coded: the model comes from ``COPILOT_LLM_MODEL``. The API k
 ``SecretStr`` and only unwrapped when the SDK client is created. Provider exceptions are mapped
 to typed errors with fixed messages and re-raised ``from None`` (the SDK's own message can echo
 request content).
+
+Retry-After: ``genai_errors.APIError`` carries the original ``httpx.Response`` (or an equivalent)
+as ``.response``. When present, its ``Retry-After`` header (a plain number of seconds for a 429 or
+503) is read defensively and passed through as ``retry_after_seconds`` on the typed error, for
+``copilot.llm.retry`` to honour. Only the header value is touched - never the response body or the
+request - so this cannot leak repository content or the API key. In practice Gemini does not
+always send this header (the replay-based unit tests below construct errors with no ``response``
+at all), so callers must treat it as optional, best-effort information.
 """
 
 from __future__ import annotations
@@ -58,7 +66,31 @@ def _int_or_none(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
-def map_api_error(code: int | None) -> LLMError:
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """Best-effort ``Retry-After`` header, in seconds. Never touches the body or the request.
+
+    Returns ``None`` whenever the header is absent, unparseable, or the exception's ``response``
+    is not the kind of object we expect (older SDK versions, replay fixtures, or a websocket
+    error can all leave ``.response`` as ``None`` or something without ``.headers``).
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    try:
+        raw = headers.get("Retry-After")
+    except Exception:  # noqa: BLE001 - defensive: header container shape varies by response type
+        return None
+    if raw is None:
+        return None
+    try:
+        # Gemini sends a numeric delta in seconds, not an HTTP-date; only that form is handled.
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def map_api_error(code: int | None, *, retry_after_seconds: float | None = None) -> LLMError:
     """Turn an HTTP status from the provider into a typed error with a fixed message."""
     if code in (401, 403):
         return LLMAuthenticationError(
@@ -70,7 +102,10 @@ def map_api_error(code: int | None) -> LLMError:
             "check COPILOT_LLM_MODEL against the provider's current model list"
         )
     if code == 429:
-        return LLMRateLimitError("Gemini rate or quota limit reached (HTTP 429)")
+        return LLMRateLimitError(
+            "Gemini rate or quota limit reached (HTTP 429)",
+            retry_after_seconds=retry_after_seconds,
+        )
     if code in (408, 504):
         return LLMTimeoutError(f"Gemini request timed out (HTTP {code})")
     if code == 400:
@@ -79,7 +114,9 @@ def map_api_error(code: int | None) -> LLMError:
             status_code=400,
         )
     suffix = f" (HTTP {code})" if code else ""
-    return LLMProviderError(f"Gemini request failed{suffix}", status_code=code)
+    return LLMProviderError(
+        f"Gemini request failed{suffix}", status_code=code, retry_after_seconds=retry_after_seconds
+    )
 
 
 class GeminiLLMClient:
@@ -131,7 +168,9 @@ class GeminiLLMClient:
                 model=self.model, contents=request.user_prompt, config=config
             )
         except genai_errors.APIError as exc:
-            raise map_api_error(getattr(exc, "code", None)) from None
+            raise map_api_error(
+                getattr(exc, "code", None), retry_after_seconds=_retry_after_seconds(exc)
+            ) from None
         except httpx.TimeoutException:
             raise LLMTimeoutError("Gemini request timed out") from None
         except httpx.HTTPError:

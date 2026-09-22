@@ -11,6 +11,27 @@ quality itself (the LLM is not used as a judge) and never declares a winner. Wor
 
 The retrieval hit (does an included source overlap a ground-truth region?) is objective and
 computed automatically; everything about answer quality is a human judgement.
+
+## Resuming an interrupted run
+
+A hosted model can rate-limit or briefly go down mid-run (this happened on the first real 34
+question run against Gemini: see ``docs/evaluation.md``). ``run_comparison`` accepts
+``resume_from`` (a previously written ``ComparisonRun``, e.g. via ``load_comparison``) and:
+
+* refuses to resume - before making a single hosted call - if the existing file's benchmark,
+  repository, index, model, prompt versions, generation settings or question-id set do not match
+  this run (``ComparisonMismatchError``), so two different experiments can never be silently
+  mixed into one file;
+* for each question, reuses a side's existing record unchanged (byte-for-byte, including any
+  ratings already filled in) whenever that side's ``error`` is ``None``, and only re-asks the
+  side(s) that previously failed;
+* writes the accumulated run to ``checkpoint_path`` (atomically, via
+  ``copilot.utils.atomic_file.write_text_atomically``) after every question, so a crash, a
+  Ctrl+C, or exhausting the retry budget loses at most the in-flight question - every previously
+  completed question stays on disk exactly as it was.
+
+Retrying a transient provider failure (HTTP 429/503) is handled separately, underneath each call,
+by ``copilot.llm.retry``; see that module for the backoff policy and its reasoning.
 """
 
 from __future__ import annotations
@@ -28,9 +49,11 @@ from copilot.config import Settings, get_settings
 from copilot.evaluation.benchmark import Benchmark, BenchmarkQuestion
 from copilot.evaluation.matching import first_hit_rank
 from copilot.llm import LLMClient, LLMError
+from copilot.llm.retry import DEFAULT_RETRY_POLICY, RetryPolicy, call_with_retry
 from copilot.rag.models import AnswerStatus
 from copilot.rag.service import RagService, SupportsRetrieve, answer_plain
 from copilot.security import RepositorySecretRiskError
+from copilot.utils.atomic_file import write_text_atomically
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +179,10 @@ class ComparisonRun(BaseModel):
     entries: list[ComparisonEntry]
 
 
+class ComparisonMismatchError(ValueError):
+    """``resume_from`` does not match the requested run; refuses to mix two experiments."""
+
+
 def select_questions(
     benchmark: Benchmark, ids: Sequence[str] = (), limit: int | None = None
 ) -> list[BenchmarkQuestion]:
@@ -175,19 +202,45 @@ def _safe_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _ask_plain(question: str, llm: LLMClient, settings: Settings) -> PlainRecord:
+def _ask_plain(
+    question: str,
+    llm: LLMClient,
+    settings: Settings,
+    *,
+    retry_policy: RetryPolicy,
+    retry_sleep: Callable[[float], None],
+    on_retry: Callable[[int, LLMError, float], None] | None = None,
+) -> PlainRecord:
     started = time.perf_counter()
     try:
-        answer = answer_plain(question, llm, settings=settings)
+        answer = call_with_retry(
+            lambda: answer_plain(question, llm, settings=settings),
+            policy=retry_policy,
+            sleep=retry_sleep,
+            on_retry=on_retry,
+        )
     except (LLMError, RepositorySecretRiskError) as exc:
         return PlainRecord(error=_safe_error(exc), latency_seconds=_elapsed(started))
     return PlainRecord(answer=answer.answer, latency_seconds=_elapsed(started))
 
 
-def _ask_rag(question: BenchmarkQuestion, service: RagService, top_k: int) -> RagRecord:
+def _ask_rag(
+    question: BenchmarkQuestion,
+    service: RagService,
+    top_k: int,
+    *,
+    retry_policy: RetryPolicy,
+    retry_sleep: Callable[[float], None],
+    on_retry: Callable[[int, LLMError, float], None] | None = None,
+) -> RagRecord:
     started = time.perf_counter()
     try:
-        answer = service.answer(question.question, top_k)
+        answer = call_with_retry(
+            lambda: service.answer(question.question, top_k),
+            policy=retry_policy,
+            sleep=retry_sleep,
+            on_retry=on_retry,
+        )
     except (LLMError, RepositorySecretRiskError) as exc:
         return RagRecord(status="error", error=_safe_error(exc), latency_seconds=_elapsed(started))
     sources = tuple(
@@ -220,6 +273,59 @@ def _elapsed(started: float) -> float:
     return round(time.perf_counter() - started, 3)
 
 
+def _check_resume_compatible(
+    existing: ComparisonRun,
+    *,
+    questions: Sequence[BenchmarkQuestion],
+    llm: LLMClient,
+    top_k: int,
+    settings: Settings,
+    benchmark_name: str | None,
+    repository_name: str | None,
+    index_id: str | None,
+) -> None:
+    """Fail closed (before any hosted call) unless resuming means "the same experiment"."""
+    from copilot.rag.prompts import PLAIN_PROMPT_VERSION, RAG_PROMPT_VERSION
+
+    mismatches: list[str] = []
+
+    def check(label: str, old: object, new: object) -> None:
+        if old != new:
+            mismatches.append(f"{label} (existing={old!r}, requested={new!r})")
+
+    check("schema_version", existing.schema_version, COMPARISON_SCHEMA)
+    check("benchmark_name", existing.benchmark_name, benchmark_name)
+    check("repository_name", existing.repository_name, repository_name)
+    check("index_id", existing.index_id, index_id)
+    check("llm_provider", existing.llm_provider, llm.provider)
+    check("llm_model", existing.llm_model, llm.model)
+    check("plain_prompt_version", existing.plain_prompt_version, PLAIN_PROMPT_VERSION)
+    check("rag_prompt_version", existing.rag_prompt_version, RAG_PROMPT_VERSION)
+    check("top_k", existing.top_k, top_k)
+    check("temperature", existing.temperature, settings.llm_temperature)
+    check("max_output_tokens", existing.max_output_tokens, settings.llm_max_output_tokens)
+
+    existing_ids = {e.question_id for e in existing.entries}
+    requested_ids = {q.id for q in questions}
+    if existing_ids != requested_ids:
+        missing = sorted(requested_ids - existing_ids)
+        extra = sorted(existing_ids - requested_ids)
+        detail = []
+        if missing:
+            detail.append(f"requested but not in the existing file: {missing}")
+        if extra:
+            detail.append(f"in the existing file but not requested: {extra}")
+        mismatches.append("question_id set differs (" + "; ".join(detail) + ")")
+
+    if mismatches:
+        raise ComparisonMismatchError(
+            "cannot resume: the existing comparison file does not match this run - "
+            + "; ".join(mismatches)
+            + ". Use a different --output file for a new experiment, or match the original "
+            "benchmark/index/model/settings to resume this one."
+        )
+
+
 def run_comparison(
     questions: Sequence[BenchmarkQuestion],
     retriever: SupportsRetrieve,
@@ -233,27 +339,102 @@ def run_comparison(
     delay_seconds: float = 0.0,
     progress: Callable[[str], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    resume_from: ComparisonRun | None = None,
+    retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY,
+    checkpoint_path: str | Path | None = None,
 ) -> ComparisonRun:
     """Ask each question through the plain baseline and through RAG; rate nothing.
 
-    Both paths go through ``GuardedLLMClient`` (the services wrap ``llm``). A gate refusal or a
-    provider error on one question is recorded and the run continues with the next question.
+    Both paths go through ``GuardedLLMClient`` (the services wrap ``llm``). A transient provider
+    failure (HTTP 429/503) is retried under ``retry_policy`` before being recorded; any other gate
+    refusal or provider error is recorded as-is and the run continues with the next question.
+
+    ``resume_from``, when given, must describe the same experiment (see
+    ``_check_resume_compatible``) - checked before any hosted call - and any side whose existing
+    ``error`` is ``None`` is reused unchanged instead of being asked again. ``checkpoint_path``,
+    when given, is (re)written atomically after every question so an interruption loses at most
+    the question in flight.
     """
     from copilot.rag.prompts import PLAIN_PROMPT_VERSION, RAG_PROMPT_VERSION
 
     settings = settings or get_settings()
     k = top_k if top_k is not None else settings.retrieval_top_k
+
+    if resume_from is not None:
+        _check_resume_compatible(
+            resume_from,
+            questions=questions,
+            llm=llm,
+            top_k=k,
+            settings=settings,
+            benchmark_name=benchmark_name,
+            repository_name=repository_name,
+            index_id=index_id,
+        )
+    prior_by_id = {e.question_id: e for e in resume_from.entries} if resume_from is not None else {}
+
+    def make_run(entries: list[ComparisonEntry]) -> ComparisonRun:
+        return ComparisonRun(
+            benchmark_name=benchmark_name,
+            repository_name=repository_name,
+            index_id=index_id,
+            llm_provider=llm.provider,
+            llm_model=llm.model,
+            plain_prompt_version=PLAIN_PROMPT_VERSION,
+            rag_prompt_version=RAG_PROMPT_VERSION,
+            top_k=k,
+            temperature=settings.llm_temperature,
+            max_output_tokens=settings.llm_max_output_tokens,
+            entries=entries,
+        )
+
     service = RagService(retriever, llm, settings=settings)
     entries: list[ComparisonEntry] = []
     for number, question in enumerate(questions, start=1):
         if progress:
             progress(f"[{number}/{len(questions)}] {question.id}")
-        plain = _ask_plain(question.question, llm, settings)
-        if delay_seconds:
-            sleep(delay_seconds)
-        rag = _ask_rag(question, service, k)
-        if delay_seconds:
-            sleep(delay_seconds)
+        prior = prior_by_id.get(question.id)
+
+        def log_retry(side: str) -> Callable[[int, LLMError, float], None] | None:
+            if not progress:
+                return None
+            return lambda attempt, exc, delay: progress(
+                f"  {side}: retry {attempt}/{retry_policy.max_attempts - 1} after "
+                f"{_safe_error(exc)}; waiting {delay:.1f}s"
+            )
+
+        if prior is not None and prior.plain.error is None:
+            plain = prior.plain
+            if progress:
+                progress("  plain: reusing existing successful answer")
+        else:
+            plain = _ask_plain(
+                question.question,
+                llm,
+                settings,
+                retry_policy=retry_policy,
+                retry_sleep=sleep,
+                on_retry=log_retry("plain"),
+            )
+            if delay_seconds:
+                sleep(delay_seconds)
+
+        if prior is not None and prior.rag.error is None:
+            rag = prior.rag
+            if progress:
+                progress("  rag: reusing existing successful answer")
+        else:
+            rag = _ask_rag(
+                question,
+                service,
+                k,
+                retry_policy=retry_policy,
+                retry_sleep=sleep,
+                on_retry=log_retry("rag"),
+            )
+            if delay_seconds:
+                sleep(delay_seconds)
+
         entries.append(
             ComparisonEntry(
                 question_id=question.id,
@@ -263,21 +444,15 @@ def run_comparison(
                 ),
                 plain=plain,
                 rag=rag,
+                plain_rating=prior.plain_rating if prior is not None else None,
+                rag_rating=prior.rag_rating if prior is not None else None,
             )
         )
-    return ComparisonRun(
-        benchmark_name=benchmark_name,
-        repository_name=repository_name,
-        index_id=index_id,
-        llm_provider=llm.provider,
-        llm_model=llm.model,
-        plain_prompt_version=PLAIN_PROMPT_VERSION,
-        rag_prompt_version=RAG_PROMPT_VERSION,
-        top_k=k,
-        temperature=settings.llm_temperature,
-        max_output_tokens=settings.llm_max_output_tokens,
-        entries=entries,
-    )
+
+        if checkpoint_path is not None:
+            write_comparison(make_run(entries), checkpoint_path)
+
+    return make_run(entries)
 
 
 def dump_comparison(run: ComparisonRun) -> str:
@@ -286,9 +461,12 @@ def dump_comparison(run: ComparisonRun) -> str:
 
 
 def write_comparison(run: ComparisonRun, path: str | Path) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(dump_comparison(run), encoding="utf-8", newline="\n")
+    """Write ``run`` as JSON, atomically (see ``copilot.utils.atomic_file``).
+
+    Used both for the final write and for every incremental checkpoint during ``run_comparison``,
+    so a reader (including a resumed run) never observes a half-written file.
+    """
+    write_text_atomically(path, dump_comparison(run))
 
 
 def load_comparison(path: str | Path) -> ComparisonRun:

@@ -20,6 +20,7 @@ from copilot.llm.fake import FakeLLMClient
 from copilot.llm.gemini import GeminiLLMClient
 from copilot.llm.guarded import GuardedLLMClient
 from copilot.llm.models import LLMRequest, LLMResponse
+from copilot.llm.retry import RetryPolicy, call_with_retry, is_transient
 
 __all__ = [
     "FakeLLMClient",
@@ -36,5 +37,8 @@ __all__ = [
     "LLMResponse",
     "LLMResponseError",
     "LLMTimeoutError",
+    "RetryPolicy",
+    "call_with_retry",
     "create_llm_client",
+    "is_transient",
 ]

@@ -219,9 +219,11 @@ timings depend on hardware and are informative only.
 
 # Plain LLM vs repository-aware RAG (Milestone 6)
 
-Status: **the comparison framework is implemented and tested with fake models. No plain-vs-RAG
-results exist yet and none are claimed.** A real run needs a hosted model, and quality judgements
-need a human reader.
+Status: **the comparison framework is implemented and tested with fake models. A first live
+34-question run was attempted and hit sustained Gemini rate limiting; it is not a valid
+plain-vs-RAG result and none is claimed from it - see "The first live 34-question run was not
+a valid comparison" below.** No comparison result of any kind exists yet, and quality
+judgements still need a human reader.
 
 ## Question being asked
 
@@ -258,7 +260,7 @@ uv run python -m copilot.evaluation summarize data\evaluation\compare-8.json
 committed. Each question is recorded with: the question, expected regions, the plain answer (or
 error), the RAG status/answer/sources/cited and unknown source numbers/retrieval and total latency,
 and empty `plain_rating` / `rag_rating` slots. A provider error or gate refusal on one question is
-recorded and the run continues.
+recorded and the run continues, retrying a transient provider failure (HTTP 429/503) with a bounded backoff first - see "Resuming an interrupted or rate-limited run" below for what counts as transient, the retry/pacing distinction, and `--resume`, which continues an existing `--output` file instead of starting over.
 
 ## Manual rubric (`answer-comparison/1`, also embedded in every file)
 
@@ -285,3 +287,89 @@ exist yet.
   baseline (not run; the plain prompt has no abstention instruction).
 * A low RAG score with `first_relevant_source = null` is a *retrieval* failure, not necessarily a
   generation failure; report the two separately.
+
+## The first live 34-question run was not a valid comparison
+
+A native-Windows run of `compare` against all 34 questions (index `4aaeab9c650ab76c`, model
+`gemini-3.6-flash`, `top_k=5`, `temperature=0.0`, `max_output_tokens=1024`, `--delay-seconds 1`)
+hit sustained Gemini rate/quota limiting:
+
+| system | successful | failed | failure breakdown |
+|---|---|---|---|
+| plain | 3/34 | 31/34 | 30 x HTTP 429, 1 x HTTP 503 |
+| RAG | 5/34 | 29/34 | 29 x HTTP 429 |
+
+Only three questions (`impl-chunk-id`, `impl-embed-config`, `impl-symlinks`) had **both** sides
+succeed. RAG additionally succeeded alone on `impl-ingest` and `impl-sensitive-files` (the plain
+side of `impl-ingest` hit the one HTTP 503). Every question from `impl-read-decode` onward failed
+on both sides with HTTP 429. **This is not a valid plain-vs-RAG result and is not summarized as
+one**: with 31/34 plain answers and 29/34 RAG answers missing, the three (or five) surviving pairs
+say nothing about whether RAG changes answer quality - they mostly say that 1 request/second was
+not slow enough for the quota in effect at the time. No conclusion about RAG quality is drawn from
+this run, and none should be until a resumed run actually completes both sides for a real subset.
+
+The root cause was pacing, not the code path: a fixed `--delay-seconds 1` between requests
+(`run_comparison`'s own `sleep` calls) does not adapt when the provider is already refusing
+requests, and a single provider error was previously **recorded and moved on**, so a transient
+429 was treated exactly like a permanent one - correct behaviour for a genuinely wrong request,
+wrong behaviour for a provider asking to be tried again shortly. The `--resume`/retry/checkpoint
+mechanism below exists to fix exactly this, without touching retrieval, chunking, embeddings, the
+benchmark, the prompts, or any generation setting.
+
+## Resuming an interrupted or rate-limited run
+
+`compare --resume` continues an existing `--output` file instead of starting over:
+
+* **Compatibility is checked before any hosted call.** The existing file's schema version,
+  benchmark name, repository name, index id, LLM provider/model, plain/RAG prompt versions,
+  `top_k`, `temperature`, `max_output_tokens`, and the exact set of question ids must all match
+  the requested run, or `compare` refuses with `ComparisonMismatchError` and calls nothing. Two
+  different experiments can never be silently merged into one file.
+* **A side counts as successful when its `error` field is `null`** - `"answered"` and
+  `"insufficient_evidence"` are both legitimate, non-error RAG outcomes and are reused exactly
+  like a successful plain answer. A successful side (answer, error, latency, sources, citations,
+  and any `plain_rating`/`rag_rating` already filled in) is reused byte-for-byte; only a side
+  whose `error` is not `null` is re-asked. If a question's plain side succeeded and its RAG side
+  failed, resuming makes exactly one new hosted call for that question (RAG only), and
+  vice versa; if both already succeeded, resuming that question makes zero hosted calls.
+* **Checkpointing is atomic and incremental.** After every question, the accumulated comparison
+  run is written to `--output` via `copilot.utils.atomic_file.write_text_atomically` (temp file in
+  the same directory, `fsync`, then one `os.replace`) - the same "write, sync, then rename"
+  pattern `copilot.vectorstore.atomic` already uses for index directories, applied to a single
+  JSON file instead of a directory of files. A reader (including a later `--resume`) only ever
+  sees the previous complete file or the new complete file, never a half-written one. Ctrl+C, a
+  crash, or exhausting the retry budget on one question loses at most that one in-flight question
+  - every question completed before it stays on disk exactly as it was, and `KeyboardInterrupt`
+  is never caught and recorded as a fake model failure; it aborts the run immediately and `compare`
+  reports where the checkpoint stopped.
+* **Retry backoff is separate from request pacing.** `--delay-seconds` (unchanged default `0.0`)
+  still pauses after *every* request, successful or not - it paces a well-behaved run. The new
+  `--retry-*` flags govern what happens only after a transient provider failure: HTTP 429
+  (`LLMRateLimitError`) or HTTP 503 (`LLMProviderError` with `status_code == 503`) - see
+  `copilot.llm.retry` for the full reasoning. Nothing else is retried: a bad model name, bad
+  credentials, a blocked/malformed response, or the secret gate's refusal are fixed conditions
+  that another identical attempt cannot change, so they are recorded immediately, exactly as
+  before. Defaults: 5s initial wait, x2 growth, capped at 60s, 5 attempts total (1 try + 4
+  retries) - chosen because the run above kept hitting *sustained* 429s at 1-second spacing, so a
+  short first wait clears a brief burst while the cap keeps one stuck question from blocking a
+  resume for minutes. A Gemini `Retry-After` response header, when the SDK exposes one, extends
+  (but never exceeds) the computed wait; in practice Gemini has not been observed to send it, so
+  this is a best-effort improvement, not something the policy depends on.
+* **Reporting.** `compare` always prints the total question count and, per system, how many
+  succeeded (and how many of those were reused from the existing file, when resuming) versus how
+  many still have an error after retries, whether the run is complete (zero remaining errors on
+  both sides), and the output path. A question left with an error after retries keeps that typed
+  error in the JSON so a later `--resume` can retry it again with a fresh backoff budget.
+
+Recommended command to resume the interrupted run against the existing index (a materially larger
+delay than the `1` second that was insufficient the first time; the retry flags use their
+defaults, shown here for clarity):
+
+```powershell
+uv run python -m copilot.evaluation compare benchmarks\copilot_self_055a8d5.jsonl --repo . `
+    --index data\indexes\4aaeab9c650ab76c --output data\evaluation\compare.json --resume `
+    --delay-seconds 8 --retry-initial-delay 5 --retry-multiplier 2 --retry-max-delay 60 --retry-max-attempts 5
+```
+
+If Gemini's quota is still exhausted, `--resume` can simply be run again later: every question
+already answered on both sides is reused unchanged and only the still-failing ones are retried.
