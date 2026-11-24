@@ -1,0 +1,11 @@
+{
+  "schema": "synthetic-repo-freeze/1",
+  "repository_id": "inventory-orders",
+  "root": "generation-eval/repos/inventory-orders",
+  "origin": "Newly authored synthetic Python project; no external code, data or downloads.",
+  "repository_fingerprint": "f633e7fef839f06900a8f751b77d2f93f409bb0adb39e4770e7ba4938d930522",
+  "ingested_file_count": 30,
+  "ingestion_policy": "default IngestionPolicy.from_settings(Settings(_env_file=None)); no extra ignored directories",
+  "frozen_before_questions_authored": true,
+  "own_test_suite": "54 tests, all passing at freeze time (pytest, standard library only)"
+}
