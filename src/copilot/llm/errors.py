@@ -34,7 +34,16 @@ class LLMRateLimitError(LLMError):
 
 
 class LLMTimeoutError(LLMError):
-    """The request did not finish within the configured timeout."""
+    """The request did not finish in time.
+
+    ``status_code`` is set only when the *provider* said so over HTTP (408 request timeout, 504
+    gateway timeout); it is ``None`` for a client-side timeout where no response arrived at all.
+    The distinction matters for retries: see ``copilot.llm.retry.is_transient``.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class LLMConnectionError(LLMError):

@@ -119,6 +119,18 @@ def test_provider_errors_are_mapped_and_never_leak_the_raw_body_or_chain(code):
     assert type(info.value).__module__.startswith("copilot.llm")
 
 
+def test_http_504_carries_its_status_so_it_can_be_retried_but_a_client_timeout_does_not():
+    assert map_api_error(504).status_code == 504
+    assert map_api_error(408).status_code == 408
+    with pytest.raises(LLMTimeoutError) as http_504:
+        client(FakeSdk(error=api_error(504))).generate(request())
+    assert http_504.value.status_code == 504
+    assert RAW_BODY not in str(http_504.value)
+    with pytest.raises(LLMTimeoutError) as local:
+        client(FakeSdk(error=httpx.ReadTimeout("slow " + RAW_BODY))).generate(request())
+    assert local.value.status_code is None  # no HTTP response at all: not a retryable 504
+
+
 def test_timeouts_and_network_failures_are_typed():
     with pytest.raises(LLMTimeoutError):
         client(FakeSdk(error=httpx.ReadTimeout("slow " + RAW_BODY))).generate(request())

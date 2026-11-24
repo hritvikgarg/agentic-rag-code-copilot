@@ -32,6 +32,25 @@ are created lazily and once; both factories are injectable, so the tests run the
 fake embedder and a fake LLM and no network. An exception that is not on the user-facing list is
 reported by type only, never echoed (it could contain a host path).
 
+## Literal file names (Milestone 7.1)
+
+Streamlit renders most widget text as Markdown, so a path such as `src/pkg/__init__.py` showed up
+as `src/pkg/` + **init** + `.py` (the double underscores read as bold) in the source expander title.
+Checked by rendering real Streamlit 1.67 in a browser:
+
+| Where | Markdown? | Fix |
+|---|---|---|
+| expander title, `st.success`, `st.caption` | yes | interpolated values go through `presentation.literal()` (an inline code span; the fence is longer than any backtick in the text) |
+| `st.error` with an exception message | yes (also `:emoji:`, `$latex$`, `:red[..]`) | whole message through `presentation.escape_markdown()` (backslash before every ASCII punctuation character) |
+| `st.selectbox` option labels | **no** | left alone - escaping would display the backslashes |
+| `st.code` (the evidence text) | no | unchanged |
+| `st.markdown(answer.answer)` | yes, on purpose | unchanged, see limitations |
+
+`tests/unit/test_presentation.py` renders ten awkward paths (`__init__.py`, `**bold**.py`,
+`file[1](x).py`, a backtick, `:smile:`, `$x$`, spaces, ...) through a CommonMark renderer and checks
+that the path comes back byte for byte; `tests/unit/test_streamlit_app.py` checks the real app's
+expander titles and the "Ready" banner.
+
 ## Viva notes
 
 * **Why a service layer?** One tested entry point for the UI, the CLI and the LangGraph workflow.
@@ -50,3 +69,7 @@ reported by type only, never echoed (it could contain a host path).
 * One user, one process: indexes are chosen by folder; there is no upload or GitHub-URL input yet.
 * The UI asks synchronously; a slow model call blocks the page (a spinner is shown).
 * No conversation memory: each question is independent.
+* The model's own answer is rendered as Markdown (its headings and lists are wanted). If the model
+  writes `__init__.py` without backticks, Markdown will still bold it. The UI cannot fix that
+  without rewriting the model's text; the "Retrieved sources" titles are the authoritative
+  file names.

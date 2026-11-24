@@ -1,11 +1,14 @@
 """Bounded exponential backoff for transient hosted-LLM failures (Milestone 6 evaluation runner).
 
-Only two kinds of provider failure are worth a second attempt: an explicit rate/quota limit
-(HTTP 429, ``LLMRateLimitError``) and a generic provider failure that specifically carries HTTP
-503 ("service unavailable", surfaced as ``LLMProviderError`` with ``status_code == 503``) - both
-are the provider saying "try again later", not "this request is wrong". Every other ``LLMError``
-(bad configuration, bad credentials, an unknown model, a blocked or malformed response, a 400) is
-a fixed condition that another identical attempt cannot fix, so it is raised immediately. The
+Only three kinds of provider failure are worth a second attempt: an explicit rate/quota limit
+(HTTP 429, ``LLMRateLimitError``), "service unavailable" (HTTP 503, ``LLMProviderError`` with
+``status_code == 503``) and "gateway timeout" (HTTP 504, ``LLMTimeoutError`` with
+``status_code == 504``) - each is the provider or its proxy saying "try again later", not "this
+request is wrong". A client-side timeout (no HTTP response at all) and HTTP 408 are deliberately
+NOT retried: the request would be identical and would most likely take just as long again.
+Every other ``LLMError`` (bad configuration, bad credentials, an unknown model, a blocked or
+malformed response, a 400) is a fixed condition that another identical attempt cannot fix, so it
+is raised immediately. The
 secret gate's ``RepositorySecretRiskError`` is not an ``LLMError`` at all and is never retried
 here either: retrying would just repeat the same "unsafe to send" decision on the same content.
 
@@ -27,7 +30,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from copilot.llm.errors import LLMError, LLMProviderError, LLMRateLimitError
+from copilot.llm.errors import LLMError, LLMProviderError, LLMRateLimitError, LLMTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +77,8 @@ def is_transient(exc: Exception) -> bool:
     """True only for the provider failures a second identical attempt can plausibly fix."""
     if isinstance(exc, LLMRateLimitError):
         return True
+    if isinstance(exc, LLMTimeoutError):
+        return exc.status_code == 504
     return isinstance(exc, LLMProviderError) and exc.status_code == 503
 
 

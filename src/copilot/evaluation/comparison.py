@@ -30,8 +30,26 @@ question run against Gemini: see ``docs/evaluation.md``). ``run_comparison`` acc
   Ctrl+C, or exhausting the retry budget loses at most the in-flight question - every previously
   completed question stays on disk exactly as it was.
 
-Retrying a transient provider failure (HTTP 429/503) is handled separately, underneath each call,
-by ``copilot.llm.retry``; see that module for the backoff policy and its reasoning.
+Retrying a transient provider failure (HTTP 429/503/504) is handled separately, underneath each
+call, by ``copilot.llm.retry``; see that module for the backoff policy and its reasoning.
+
+## Side states and the circuit breaker (Milestone 7.1)
+
+Every side (plain or RAG) of every question is in exactly one of three states, computed by
+``side_state``: ``successful`` (a hosted answer was recorded), ``failed`` (the call was made and
+ended in an error) or ``not_attempted`` (no hosted call was made for it in any run so far). A file
+always lists *every* requested question - questions not reached yet carry ``not_attempted``
+placeholders - so an interrupted file is a valid ``--resume`` input and still passes the
+question-id-set check.
+
+Retrying with backoff cannot help when the provider keeps refusing every request, and each retry
+round costs about 75 seconds. ``max_consecutive_rate_limit_failures`` (default 3) is a circuit
+breaker above the retry layer: when that many hosted sides *in a row* have exhausted their retries
+with HTTP 429, the run stops, writes the checkpoint and records ``stop_reason``. The streak counts
+only hosted calls that ended in a rate-limit error; a hosted success or any other kind of outcome
+(including a different error) ends the streak, and a side reused from ``resume_from`` is not a
+hosted call so it neither extends nor ends it. The breaker only reports what the provider said
+(HTTP 429); it does not claim to know which limit was hit.
 """
 
 from __future__ import annotations
@@ -48,7 +66,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from copilot.config import Settings, get_settings
 from copilot.evaluation.benchmark import Benchmark, BenchmarkQuestion
 from copilot.evaluation.matching import first_hit_rank
-from copilot.llm import LLMClient, LLMError
+from copilot.llm import LLMClient, LLMError, LLMRateLimitError
 from copilot.llm.retry import DEFAULT_RETRY_POLICY, RetryPolicy, call_with_retry
 from copilot.rag.models import AnswerStatus
 from copilot.rag.service import RagService, SupportsRetrieve, answer_plain
@@ -58,6 +76,11 @@ from copilot.utils.atomic_file import write_text_atomically
 logger = logging.getLogger(__name__)
 
 COMPARISON_SCHEMA = "answer-comparison/1"
+
+#: Default circuit-breaker threshold: stop after this many consecutive HTTP-429 sides.
+DEFAULT_MAX_CONSECUTIVE_RATE_LIMIT_FAILURES = 3
+
+SideState = Literal["successful", "failed", "not_attempted"]
 
 RUBRIC: dict[str, str] = {
     "grounded_correctness": (
@@ -131,12 +154,15 @@ class PlainRecord(BaseModel):
     answer: str | None = None
     error: str | None = None  # a safe, fixed-message error class name + message
     latency_seconds: float | None = None
+    # True only for a placeholder: no hosted call was made. Additive and defaulted, so files
+    # written before Milestone 7.1 load unchanged (schema stays answer-comparison/1).
+    not_attempted: bool = False
 
 
 class RagRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    status: Literal["answered", "insufficient_evidence", "error"]
+    status: Literal["answered", "insufficient_evidence", "error", "not_attempted"]
     answer: str | None = None
     insufficient_reason: str | None = None
     error: str | None = None
@@ -176,7 +202,19 @@ class ComparisonRun(BaseModel):
     temperature: float
     max_output_tokens: int
     rubric: dict[str, str] = Field(default_factory=lambda: dict(RUBRIC))
+    # Why this run ended before every side was attempted (circuit breaker); None otherwise.
+    stop_reason: str | None = None
     entries: list[ComparisonEntry]
+
+
+def side_state(record: PlainRecord | RagRecord) -> SideState:
+    """The state of one side. A side is reusable on resume only when it is ``successful``."""
+    if isinstance(record, RagRecord):
+        if record.status == "not_attempted":
+            return "not_attempted"
+    elif record.not_attempted:
+        return "not_attempted"
+    return "failed" if record.error is not None else "successful"
 
 
 class ComparisonMismatchError(ValueError):
@@ -210,7 +248,8 @@ def _ask_plain(
     retry_policy: RetryPolicy,
     retry_sleep: Callable[[float], None],
     on_retry: Callable[[int, LLMError, float], None] | None = None,
-) -> PlainRecord:
+) -> tuple[PlainRecord, Exception | None]:
+    """The record plus the exception that ended it (``None`` on success)."""
     started = time.perf_counter()
     try:
         answer = call_with_retry(
@@ -220,8 +259,8 @@ def _ask_plain(
             on_retry=on_retry,
         )
     except (LLMError, RepositorySecretRiskError) as exc:
-        return PlainRecord(error=_safe_error(exc), latency_seconds=_elapsed(started))
-    return PlainRecord(answer=answer.answer, latency_seconds=_elapsed(started))
+        return PlainRecord(error=_safe_error(exc), latency_seconds=_elapsed(started)), exc
+    return PlainRecord(answer=answer.answer, latency_seconds=_elapsed(started)), None
 
 
 def _ask_rag(
@@ -232,7 +271,8 @@ def _ask_rag(
     retry_policy: RetryPolicy,
     retry_sleep: Callable[[float], None],
     on_retry: Callable[[int, LLMError, float], None] | None = None,
-) -> RagRecord:
+) -> tuple[RagRecord, Exception | None]:
+    """The record plus the exception that ended it (``None`` on success)."""
     started = time.perf_counter()
     try:
         answer = call_with_retry(
@@ -242,7 +282,10 @@ def _ask_rag(
             on_retry=on_retry,
         )
     except (LLMError, RepositorySecretRiskError) as exc:
-        return RagRecord(status="error", error=_safe_error(exc), latency_seconds=_elapsed(started))
+        record = RagRecord(
+            status="error", error=_safe_error(exc), latency_seconds=_elapsed(started)
+        )
+        return record, exc
     sources = tuple(
         SourceRecord(
             source_number=s.source_number,
@@ -255,7 +298,7 @@ def _ask_rag(
         )
         for s in answer.sources
     )
-    return RagRecord(
+    record = RagRecord(
         status=("answered" if answer.status is AnswerStatus.ANSWERED else "insufficient_evidence"),
         answer=answer.answer,
         insufficient_reason=answer.insufficient_reason,
@@ -267,6 +310,7 @@ def _ask_rag(
         retrieval_seconds=answer.retrieval_seconds,
         latency_seconds=_elapsed(started),
     )
+    return record, None
 
 
 def _elapsed(started: float) -> float:
@@ -317,6 +361,20 @@ def _check_resume_compatible(
             detail.append(f"in the existing file but not requested: {extra}")
         mismatches.append("question_id set differs (" + "; ".join(detail) + ")")
 
+    # The benchmark's regions are anchored to one repository snapshot. If a question's text or
+    # expected regions changed since the file was written, the stored objective retrieval hits
+    # (and the questions the answers respond to) no longer describe this run: refuse, do not mix.
+    drifted = sorted(
+        q.id
+        for q in questions
+        if (prior := next((e for e in existing.entries if e.question_id == q.id), None)) is not None
+        and (prior.question != q.question or prior.expected_regions != _region_strings(q))
+    )
+    if drifted:
+        mismatches.append(
+            f"the benchmark's question text or expected regions changed for: {drifted}"
+        )
+
     if mismatches:
         raise ComparisonMismatchError(
             "cannot resume: the existing comparison file does not match this run - "
@@ -324,6 +382,35 @@ def _check_resume_compatible(
             + ". Use a different --output file for a new experiment, or match the original "
             "benchmark/index/model/settings to resume this one."
         )
+
+
+def _stop_message(streak: int) -> str:
+    return (
+        f"stopped after {streak} consecutive hosted request(s) ended in HTTP 429 (rate or quota "
+        "limit) after exhausting their retries. The provider did not say which limit was hit. "
+        "Completed answers and ratings are saved; resume later with --resume."
+    )
+
+
+def _region_strings(question: BenchmarkQuestion) -> tuple[str, ...]:
+    return tuple(f"{r.file_path}:{r.start_line}-{r.end_line}" for r in question.relevant)
+
+
+def _entry_for(question: BenchmarkQuestion, prior: ComparisonEntry | None) -> ComparisonEntry:
+    """The entry for ``question``, carrying over ``prior``'s sides and ratings unchanged.
+
+    The question text and expected regions always come from the current benchmark; the sides
+    (whatever state they are in) and the human ratings come from ``prior`` when there is one.
+    """
+    return ComparisonEntry(
+        question_id=question.id,
+        question=question.question,
+        expected_regions=_region_strings(question),
+        plain=prior.plain if prior is not None else PlainRecord(not_attempted=True),
+        rag=prior.rag if prior is not None else RagRecord(status="not_attempted"),
+        plain_rating=prior.plain_rating if prior is not None else None,
+        rag_rating=prior.rag_rating if prior is not None else None,
+    )
 
 
 def run_comparison(
@@ -342,20 +429,30 @@ def run_comparison(
     resume_from: ComparisonRun | None = None,
     retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY,
     checkpoint_path: str | Path | None = None,
+    max_consecutive_rate_limit_failures: int | None = (DEFAULT_MAX_CONSECUTIVE_RATE_LIMIT_FAILURES),
 ) -> ComparisonRun:
     """Ask each question through the plain baseline and through RAG; rate nothing.
 
     Both paths go through ``GuardedLLMClient`` (the services wrap ``llm``). A transient provider
-    failure (HTTP 429/503) is retried under ``retry_policy`` before being recorded; any other gate
-    refusal or provider error is recorded as-is and the run continues with the next question.
+    failure (HTTP 429/503/504) is retried under ``retry_policy`` before being recorded; any other
+    gate refusal or provider error is recorded as-is and the run continues with the next question.
 
     ``resume_from``, when given, must describe the same experiment (see
-    ``_check_resume_compatible``) - checked before any hosted call - and any side whose existing
-    ``error`` is ``None`` is reused unchanged instead of being asked again. ``checkpoint_path``,
-    when given, is (re)written atomically after every question so an interruption loses at most
-    the question in flight.
+    ``_check_resume_compatible``) - checked before any hosted call - and any side that is
+    ``successful`` there is reused unchanged instead of being asked again (``failed`` and
+    ``not_attempted`` sides are asked). ``checkpoint_path``, when given, is (re)written atomically
+    after every hosted side, so an interruption loses at most the request in flight. The written
+    file always lists every requested question.
+
+    ``max_consecutive_rate_limit_failures`` is the circuit breaker (see the module docstring):
+    after that many hosted sides in a row ended in HTTP 429 the run stops, the remaining sides are
+    left as they were (``not_attempted``, or whatever ``resume_from`` had) and the returned run's
+    ``stop_reason`` says why. ``None`` disables it.
     """
     from copilot.rag.prompts import PLAIN_PROMPT_VERSION, RAG_PROMPT_VERSION
+
+    if max_consecutive_rate_limit_failures is not None and max_consecutive_rate_limit_failures < 1:
+        raise ValueError("max_consecutive_rate_limit_failures must be >= 1 (or None to disable)")
 
     settings = settings or get_settings()
     k = top_k if top_k is not None else settings.retrieval_top_k
@@ -373,7 +470,9 @@ def run_comparison(
         )
     prior_by_id = {e.question_id: e for e in resume_from.entries} if resume_from is not None else {}
 
-    def make_run(entries: list[ComparisonEntry]) -> ComparisonRun:
+    stop_reason: str | None = None
+
+    def make_run() -> ComparisonRun:
         return ComparisonRun(
             benchmark_name=benchmark_name,
             repository_name=repository_name,
@@ -385,74 +484,79 @@ def run_comparison(
             top_k=k,
             temperature=settings.llm_temperature,
             max_output_tokens=settings.llm_max_output_tokens,
+            stop_reason=stop_reason,
             entries=entries,
         )
 
+    def checkpoint() -> None:
+        if checkpoint_path is not None:
+            write_comparison(make_run(), checkpoint_path)
+
     service = RagService(retriever, llm, settings=settings)
-    entries: list[ComparisonEntry] = []
-    for number, question in enumerate(questions, start=1):
-        if progress:
-            progress(f"[{number}/{len(questions)}] {question.id}")
-        prior = prior_by_id.get(question.id)
+    # Every requested question is present from the start (existing record, else a placeholder),
+    # so each checkpoint is a complete, resumable file.
+    entries = [_entry_for(q, prior_by_id.get(q.id)) for q in questions]
+    rate_limit_streak = 0
 
-        def log_retry(side: str) -> Callable[[int, LLMError, float], None] | None:
-            if not progress:
-                return None
-            return lambda attempt, exc, delay: progress(
-                f"  {side}: retry {attempt}/{retry_policy.max_attempts - 1} after "
-                f"{_safe_error(exc)}; waiting {delay:.1f}s"
-            )
-
-        if prior is not None and prior.plain.error is None:
-            plain = prior.plain
-            if progress:
-                progress("  plain: reusing existing successful answer")
-        else:
-            plain = _ask_plain(
-                question.question,
-                llm,
-                settings,
-                retry_policy=retry_policy,
-                retry_sleep=sleep,
-                on_retry=log_retry("plain"),
-            )
-            if delay_seconds:
-                sleep(delay_seconds)
-
-        if prior is not None and prior.rag.error is None:
-            rag = prior.rag
-            if progress:
-                progress("  rag: reusing existing successful answer")
-        else:
-            rag = _ask_rag(
-                question,
-                service,
-                k,
-                retry_policy=retry_policy,
-                retry_sleep=sleep,
-                on_retry=log_retry("rag"),
-            )
-            if delay_seconds:
-                sleep(delay_seconds)
-
-        entries.append(
-            ComparisonEntry(
-                question_id=question.id,
-                question=question.question,
-                expected_regions=tuple(
-                    f"{r.file_path}:{r.start_line}-{r.end_line}" for r in question.relevant
-                ),
-                plain=plain,
-                rag=rag,
-                plain_rating=prior.plain_rating if prior is not None else None,
-                rag_rating=prior.rag_rating if prior is not None else None,
-            )
+    def log_retry(side: str) -> Callable[[int, LLMError, float], None] | None:
+        if not progress:
+            return None
+        return lambda attempt, exc, delay: progress(
+            f"  {side}: retry {attempt}/{retry_policy.max_attempts - 1} after "
+            f"{_safe_error(exc)}; waiting {delay:.1f}s"
         )
 
-        if checkpoint_path is not None:
-            write_comparison(make_run(entries), checkpoint_path)
+    for index, question in enumerate(questions):
+        if progress:
+            progress(f"[{index + 1}/{len(questions)}] {question.id}")
 
-    return make_run(entries)
+        for side in ("plain", "rag"):
+            entry = entries[index]
+            if side_state(getattr(entry, side)) == "successful":
+                if progress:
+                    progress(f"  {side}: reusing existing successful answer")
+                continue  # not a hosted call: neither extends nor ends the 429 streak
+
+            failure: Exception | None
+            record: PlainRecord | RagRecord
+            if side == "plain":
+                record, failure = _ask_plain(
+                    question.question,
+                    llm,
+                    settings,
+                    retry_policy=retry_policy,
+                    retry_sleep=sleep,
+                    on_retry=log_retry("plain"),
+                )
+            else:
+                record, failure = _ask_rag(
+                    question,
+                    service,
+                    k,
+                    retry_policy=retry_policy,
+                    retry_sleep=sleep,
+                    on_retry=log_retry("rag"),
+                )
+            entries[index] = entry.model_copy(update={side: record})
+            checkpoint()
+
+            rate_limit_streak = (
+                rate_limit_streak + 1 if isinstance(failure, LLMRateLimitError) else 0
+            )
+            if (
+                max_consecutive_rate_limit_failures is not None
+                and rate_limit_streak >= max_consecutive_rate_limit_failures
+            ):
+                stop_reason = _stop_message(rate_limit_streak)
+                checkpoint()
+                if progress:
+                    progress(f"  circuit breaker: {stop_reason}")
+                return make_run()
+
+            if delay_seconds:
+                sleep(delay_seconds)
+
+    return make_run()
 
 
 def dump_comparison(run: ComparisonRun) -> str:

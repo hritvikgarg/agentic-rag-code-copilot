@@ -107,7 +107,7 @@ def map_api_error(code: int | None, *, retry_after_seconds: float | None = None)
             retry_after_seconds=retry_after_seconds,
         )
     if code in (408, 504):
-        return LLMTimeoutError(f"Gemini request timed out (HTTP {code})")
+        return LLMTimeoutError(f"Gemini request timed out (HTTP {code})", status_code=code)
     if code == 400:
         return LLMProviderError(
             "Gemini rejected the request (HTTP 400: invalid request, or an invalid API key)",

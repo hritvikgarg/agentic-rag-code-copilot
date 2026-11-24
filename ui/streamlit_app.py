@@ -18,7 +18,10 @@ from copilot.services.copilot_service import CopilotService
 from copilot.services.presentation import (
     USER_FACING_ERRORS,
     answer_warnings,
+    escape_markdown,
+    literal,
     parse_ignore_directories,
+    source_title,
 )
 
 st.set_page_config(page_title="Repository Copilot", layout="wide")
@@ -33,7 +36,7 @@ def get_service() -> CopilotService:
 
 def show_error(exc: Exception) -> None:
     if isinstance(exc, USER_FACING_ERRORS):
-        st.error(str(exc))
+        st.error(escape_markdown(str(exc)))
     else:  # a bug: never echo an unknown exception (it may contain host paths)
         st.error(f"Unexpected error ({type(exc).__name__}). See the server log.")
 
@@ -103,7 +106,7 @@ with st.sidebar:
                 st.session_state.pop("answer", None)
                 st.session_state["notice"] = (
                     f"Indexed {report.files} files into {report.chunks} chunks "
-                    f"in {report.seconds_total:.1f}s (index {report.index_id})."
+                    f"in {report.seconds_total:.1f}s (index {literal(report.index_id)})."
                     + (
                         " WARNING: ingestion hit a repository limit; the index is incomplete."
                         if report.ingestion_truncated
@@ -117,8 +120,8 @@ with st.sidebar:
     st.header("Settings")
     top_k = st.slider("Chunks retrieved (top-k)", 1, 20, settings.retrieval_top_k)
     compare_plain = st.checkbox("Also show the plain-LLM answer (no repository)", value=False)
-    st.caption(f"Model: {settings.llm_provider}/{settings.llm_model or 'NOT SET'}")
-    st.caption(f"Embeddings: {settings.embedding_model} (local)")
+    st.caption(f"Model: {literal(f'{settings.llm_provider}/{settings.llm_model or "NOT SET"}')}")
+    st.caption(f"Embeddings: {literal(settings.embedding_model)} (local)")
 
 notice = st.session_state.pop("notice", None)
 if notice:
@@ -127,8 +130,9 @@ opened = st.session_state.get("opened") or service.opened
 if opened is not None:
     s = opened.summary
     st.success(
-        f"Ready: {s.repository_name} - index {s.index_id} ({s.chunk_count} chunks from "
-        f"{s.source_file_count} files, {s.chunking_strategy})"
+        f"Ready: {literal(s.repository_name)} - index {literal(s.index_id)} "
+        f"({s.chunk_count} chunks from {s.source_file_count} files, "
+        f"{literal(s.chunking_strategy)})"
     )
 else:
     st.info("Open or build an index in the sidebar to start asking questions.")
@@ -155,15 +159,15 @@ if answer is not None:
     if not answer.sources:
         st.write("No evidence was supplied.")
     for source in answer.sources:
-        cited = (
-            " (cited in the answer)" if source.source_number in answer.cited_source_numbers else ""
-        )
-        with st.expander(f"[{source.label}] {source.location} - score {source.score:.3f}{cited}"):
+        cited_flag = source.source_number in answer.cited_source_numbers
+        with st.expander(
+            source_title(source.label, source.location, source.score, cited=cited_flag)
+        ):
             st.code(service.evidence_text(source), language=None)
     gen = answer.generation
     if gen is not None:
         st.caption(
-            f"{gen.provider}/{gen.model} - tokens {gen.total_tokens} - "
+            f"{literal(f'{gen.provider}/{gen.model}')} - tokens {gen.total_tokens} - "
             f"retrieval {answer.retrieval_seconds}s, generation {answer.generation_seconds}s"
         )
 

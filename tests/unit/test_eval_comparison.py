@@ -24,6 +24,7 @@ from copilot.evaluation.comparison import (
     load_comparison,
     run_comparison,
     select_questions,
+    side_state,
     summarize_ratings,
     write_comparison,
 )
@@ -439,9 +440,12 @@ def test_checkpoint_survives_a_simulated_interruption(tmp_path):
             checkpoint_path=path,
         )
     checkpoint = load_comparison(path)
-    assert len(checkpoint.entries) == 1  # q01 (2 successful calls) checkpointed before the crash
-    assert checkpoint.entries[0].question_id == "q01"
+    # Since Milestone 7.1 a checkpoint always lists every requested question, so it is a valid
+    # --resume input: q01 (2 successful calls) is saved, q02 is a not-attempted placeholder.
+    assert [e.question_id for e in checkpoint.entries] == ["q01", "q02"]
     assert checkpoint.entries[0].plain.answer == "ok" and checkpoint.entries[0].rag.answer == "ok"
+    assert side_state(checkpoint.entries[1].plain) == "not_attempted"
+    assert side_state(checkpoint.entries[1].rag) == "not_attempted"
 
 
 def test_resume_refuses_an_incompatible_run_before_any_provider_call():

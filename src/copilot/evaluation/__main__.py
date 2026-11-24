@@ -10,10 +10,16 @@
   This calls the hosted model (after the secret gate) and needs COPILOT_LLM_MODEL + GEMINI_API_KEY.
   ``--resume`` continues an existing ``--output`` file: sides that already succeeded are reused
   unchanged and only failed sides are retried; see ``docs/evaluation.md`` for the resume/retry
-  design and why it exists. Transient provider failures (HTTP 429/503) are retried automatically
-  under a bounded backoff (``--retry-*`` flags) independently of ``--delay-seconds`` (which paces
-  *every* request, successful or not).
+  design and why it exists. Transient provider failures (HTTP 429/503/504) are retried
+  automatically under a bounded backoff (``--retry-*`` flags) independently of ``--delay-seconds``
+  (which paces *every* request, successful or not). If several hosted requests in a row still end
+  in HTTP 429 after their retries (``--max-consecutive-rate-limit-failures``, default 3) the run
+  stops with exit code 3 and a saved checkpoint instead of retrying for hours; resume later.
 * ``summarize FILE``: aggregate the human ratings entered in a comparison file.
+* ``snapshot create --commit REV [--index INDEX_DIR]`` / ``snapshot verify --snapshot TREE --index
+  INDEX_DIR``: freeze a commit under ``data/snapshots/`` and check it against an index, so the
+  repository being evaluated stays fixed while the application keeps changing (Milestone 7.1;
+  see ``copilot.evaluation.snapshot`` and ``docs/evaluation.md``).
 
 Output contains repository-relative paths and numbers only. The embedding model is local.
 """
@@ -38,12 +44,14 @@ from copilot.evaluation.benchmark import (
     seal_regions,
 )
 from copilot.evaluation.comparison import (
+    DEFAULT_MAX_CONSECUTIVE_RATE_LIMIT_FAILURES,
     ComparisonEntry,
     ComparisonRun,
     format_summary,
     load_comparison,
     run_comparison,
     select_questions,
+    side_state,
     summarize_ratings,
     write_comparison,
 )
@@ -56,6 +64,12 @@ from copilot.evaluation.runner import (
     run_matrix,
     to_jsonable,
     verify_benchmark,
+)
+from copilot.evaluation.snapshot import (
+    SnapshotError,
+    create_snapshot,
+    resolve_commit,
+    verify_tree_against_index,
 )
 from copilot.ingestion import IngestionPolicy, ingest_repository
 from copilot.ingestion.errors import IngestionError
@@ -176,16 +190,24 @@ def _cmd_matrix(args: argparse.Namespace, settings: Settings) -> int:
 def _side_counts(
     run: ComparisonRun, prior_by_id: dict[str, ComparisonEntry], side: str
 ) -> tuple[int, int, int]:
-    """(successful, reused-from-existing-file, failed) for ``side`` ("plain" or "rag")."""
-    successful = sum(1 for e in run.entries if getattr(e, side).error is None)
+    """(successful, reused-from-existing-file, failed) for ``side`` ("plain" or "rag").
+
+    ``failed`` counts only sides whose call was made and ended in an error; sides never attempted
+    are counted separately by ``_not_attempted_count``.
+    """
+    successful = sum(1 for e in run.entries if side_state(getattr(e, side)) == "successful")
     reused = sum(
         1
         for e in run.entries
         if (prior := prior_by_id.get(e.question_id)) is not None
-        and getattr(prior, side).error is None
+        and side_state(getattr(prior, side)) == "successful"
     )
-    failed = len(run.entries) - successful
+    failed = sum(1 for e in run.entries if side_state(getattr(e, side)) == "failed")
     return successful, reused, failed
+
+
+def _not_attempted_count(run: ComparisonRun, side: str) -> int:
+    return sum(1 for e in run.entries if side_state(getattr(e, side)) == "not_attempted")
 
 
 def _cmd_compare(args: argparse.Namespace, settings: Settings) -> int:
@@ -231,12 +253,19 @@ def _cmd_compare(args: argparse.Namespace, settings: Settings) -> int:
         max_attempts=args.retry_max_attempts,
     )
 
+    threshold = args.max_consecutive_rate_limit_failures or None  # 0 disables the breaker
+    breaker_text = (
+        f"{threshold} consecutive sides end in HTTP 429 after their retries"
+        if threshold
+        else "never for rate limits (circuit breaker disabled)"
+    )
     print(
         f"note: {len(questions)} questions x 2 requests are sent to {llm.provider}/{llm.model} "
         "after the secret scan; retrieved repository chunks are part of the RAG requests. "
-        f"transient failures (HTTP 429/503) retry up to {retry_policy.max_attempts} attempts "
+        f"transient failures (HTTP 429/503/504) retry up to {retry_policy.max_attempts} attempts "
         f"({retry_policy.initial_delay_seconds:g}s.."
-        f"{retry_policy.max_delay_seconds:g}s backoff).",
+        f"{retry_policy.max_delay_seconds:g}s backoff); the run stops after "
+        f"{breaker_text}.",
         file=sys.stderr,
     )
     try:
@@ -254,48 +283,97 @@ def _cmd_compare(args: argparse.Namespace, settings: Settings) -> int:
             resume_from=resume_from,
             retry_policy=retry_policy,
             checkpoint_path=output_path,
+            max_consecutive_rate_limit_failures=threshold,
         )
     except KeyboardInterrupt:
         print(
-            f"\ninterrupted: the checkpoint through the last completed question is saved in "
-            f"{output_path.name}. Re-run with --resume to continue.",
+            f"\ninterrupted: every side finished so far is saved in {output_path.name} (the "
+            "request in flight is lost). Re-run with --resume to continue.",
             file=sys.stderr,
         )
         return 130
 
-    write_comparison(run, output_path)  # final write; checkpoint_path already wrote every question
+    write_comparison(run, output_path)  # final write; checkpoint_path already wrote every side
 
     prior_by_id = {e.question_id: e for e in (resume_from.entries if resume_from else [])}
     plain_ok, plain_reused, plain_failed = _side_counts(run, prior_by_id, "plain")
     rag_ok, rag_reused, rag_failed = _side_counts(run, prior_by_id, "rag")
-    complete = plain_failed == 0 and rag_failed == 0
+    plain_todo = _not_attempted_count(run, "plain")
+    rag_todo = _not_attempted_count(run, "rag")
+    complete = plain_failed == rag_failed == plain_todo == rag_todo == 0
 
-    print(f"wrote {len(run.entries)} paired answers to {output_path.name}")
+    print(f"wrote {len(run.entries)} questions to {output_path.name}")
     print(f"total questions: {len(run.entries)}")
     print(
         f"plain: {plain_ok} successful ({plain_reused} reused from the existing file), "
-        f"{plain_failed} failed"
+        f"{plain_failed} failed, {plain_todo} not attempted"
     )
     print(
         f"rag:   {rag_ok} successful ({rag_reused} reused from the existing file), "
-        f"{rag_failed} failed"
+        f"{rag_failed} failed, {rag_todo} not attempted"
     )
-    print(
-        "run complete: every question has both sides successful"
-        if complete
-        else "run INCOMPLETE: some question(s) still have a failed side after retries"
-    )
+    if run.stop_reason is not None:
+        print(f"run STOPPED EARLY (circuit breaker): {run.stop_reason}", file=sys.stderr)
+        print("run INCOMPLETE: stopped early; completed answers and ratings are saved")
+    elif complete:
+        print("run complete: every question has both sides successful")
+    else:
+        print("run INCOMPLETE: some side(s) failed after retries or were never attempted")
     print(f"output: {output_path}")
     if not complete:
         print(
-            f"{plain_failed + rag_failed} side(s) had an error after retries; see the 'error' "
-            "fields. Re-run the same command with --resume to retry only those.",
+            "Re-run the same command with --resume to ask only the failed and not-attempted "
+            "sides; successful answers and any ratings you entered are kept.",
             file=sys.stderr,
         )
+    if run.stop_reason is not None:
+        return 3  # distinct from 0 (finished), 2 (error) and 130 (Ctrl+C)
+    if not complete:
+        return 0
     print(
         "Fill in plain_rating / rag_rating per the rubric in the file, "
         "then run: python -m copilot.evaluation summarize FILE"
     )
+    return 0
+
+
+def _print_check(check, tree: Path) -> None:
+    status = "MATCH" if check.matches else "MISMATCH"
+    print(
+        f"{status}: {tree} has {check.file_count} accepted files; fingerprint "
+        f"{check.actual_fingerprint[:16]} vs index {check.index_id} "
+        f"({check.expected_fingerprint[:16]})"
+    )
+
+
+def _cmd_snapshot(args: argparse.Namespace, settings: Settings) -> int:
+    ignore = list(args.ignore_dir)
+    if args.snapshot_command == "verify":
+        check = verify_tree_against_index(
+            args.snapshot, args.index, ignore_directories=ignore, settings=settings
+        )
+        _print_check(check, Path(args.snapshot))
+        return 0 if check.matches else 2
+
+    commit = resolve_commit(args.repo_root, args.commit)
+    tree, check = create_snapshot(
+        args.repo_root,
+        commit,
+        args.dest,
+        index_dir=args.index,
+        ignore_directories=ignore,
+        settings=settings,
+    )
+    print(f"snapshot of commit {commit[:12]} is at: {tree}")
+    if check is not None:
+        _print_check(check, tree)
+        print(f"use it as: compare ... --repo {tree} --index {args.index}")
+    else:
+        print(
+            "not verified against an index (no --index given); run "
+            "'snapshot verify --snapshot TREE --index INDEX_DIR' before relying on it",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -384,6 +462,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="attempts per side before giving up (1 = no retries; "
         f"default: {DEFAULT_MAX_ATTEMPTS})",
     )
+    compare.add_argument(
+        "--max-consecutive-rate-limit-failures",
+        type=int,
+        default=DEFAULT_MAX_CONSECUTIVE_RATE_LIMIT_FAILURES,
+        help="circuit breaker: stop after this many hosted sides in a row end in HTTP 429 after "
+        "their retries (0 disables; "
+        f"default: {DEFAULT_MAX_CONSECUTIVE_RATE_LIMIT_FAILURES})",
+    )
+    snapshot = sub.add_parser(
+        "snapshot", help="freeze a commit as the repository to evaluate; verify it against an index"
+    )
+    snap_sub = snapshot.add_subparsers(dest="snapshot_command", required=True)
+    snap_create = snap_sub.add_parser("create", help="git-archive a commit into data/snapshots/")
+    snap_create.add_argument("--commit", required=True, help="commit, branch or tag to freeze")
+    snap_create.add_argument("--repo-root", default=".", help="the git checkout (default: .)")
+    snap_create.add_argument("--dest", default="data/snapshots", help="snapshots directory")
+    snap_create.add_argument(
+        "--index", help="verify against this index before installing (recommended)"
+    )
+    snap_create.add_argument(
+        "--ignore-dir", action="append", default=[], help="same set the index was built with"
+    )
+    snap_verify = snap_sub.add_parser("verify", help="check a snapshot tree against an index")
+    snap_verify.add_argument("--snapshot", required=True, help="the snapshot's tree directory")
+    snap_verify.add_argument("--index", required=True, help="index directory")
+    snap_verify.add_argument(
+        "--ignore-dir", action="append", default=[], help="same set the index was built with"
+    )
     summarize = sub.add_parser("summarize", help="aggregate the manual ratings in a compare file")
     summarize.add_argument("file", help="a file written by 'compare'")
 
@@ -400,6 +506,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "run": _cmd_run,
         "matrix": _cmd_matrix,
         "compare": _cmd_compare,
+        "snapshot": _cmd_snapshot,
         "summarize": _cmd_summarize,
     }
     try:
@@ -414,6 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         EmbeddingError,
         IngestionError,
         ChunkingError,
+        SnapshotError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

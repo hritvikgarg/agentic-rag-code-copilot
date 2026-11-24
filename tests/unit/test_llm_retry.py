@@ -3,21 +3,88 @@
 import pytest
 
 from copilot.llm.errors import (
+    LLMAuthenticationError,
     LLMConfigurationError,
+    LLMConnectionError,
     LLMProviderError,
     LLMRateLimitError,
     LLMResponseError,
+    LLMTimeoutError,
 )
 from copilot.llm.retry import RetryPolicy, call_with_retry, is_transient
 
 
-def test_only_rate_limit_and_503_are_transient():
+def test_only_rate_limit_503_and_504_are_transient():
     assert is_transient(LLMRateLimitError("429"))
     assert is_transient(LLMProviderError("503", status_code=503))
     assert not is_transient(LLMProviderError("500", status_code=500))
     assert not is_transient(LLMProviderError("400", status_code=400))
     assert not is_transient(LLMConfigurationError("no model"))
     assert not is_transient(LLMResponseError("blocked"))
+    assert is_transient(LLMTimeoutError("gateway timeout", status_code=504))
+
+
+def test_everything_else_is_not_transient():
+    # a client-side timeout (no HTTP response) and HTTP 408 are deliberately not retried
+    assert not is_transient(LLMTimeoutError("client timeout"))
+    assert not is_transient(LLMTimeoutError("request timeout", status_code=408))
+    assert not is_transient(LLMAuthenticationError("401"))
+    assert not is_transient(LLMConnectionError("dns"))
+    assert not is_transient(LLMProviderError("unknown", status_code=None))
+
+
+def test_a_504_is_retried_with_backoff_then_succeeds_without_real_sleep():
+    calls: list[int] = []
+    sleeps: list[float] = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise LLMTimeoutError("Gemini request timed out (HTTP 504)", status_code=504)
+        return "ok"
+
+    result = call_with_retry(
+        flaky, policy=RetryPolicy(initial_delay_seconds=1.0, multiplier=2.0), sleep=sleeps.append
+    )
+    assert result == "ok" and len(calls) == 3
+    assert sleeps == [1.0, 2.0]
+
+
+def test_a_persistent_504_is_bounded_by_max_attempts():
+    calls: list[int] = []
+
+    def always():
+        calls.append(1)
+        raise LLMTimeoutError("HTTP 504", status_code=504)
+
+    with pytest.raises(LLMTimeoutError):
+        call_with_retry(always, policy=RetryPolicy(max_attempts=3), sleep=lambda _s: None)
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        LLMAuthenticationError("HTTP 401"),
+        LLMConfigurationError("no model"),
+        LLMProviderError("bad request", status_code=400),
+        LLMResponseError("blocked"),
+        LLMTimeoutError("client timeout"),
+        LLMTimeoutError("HTTP 408", status_code=408),
+        ValueError("deterministic validation failure"),  # not an LLMError at all
+    ],
+)
+def test_non_retryable_failures_are_raised_on_the_first_attempt(error):
+    calls: list[int] = []
+    sleeps: list[float] = []
+
+    def failing():
+        calls.append(1)
+        raise error
+
+    with pytest.raises(type(error)):
+        call_with_retry(failing, sleep=sleeps.append)
+    assert len(calls) == 1 and sleeps == []  # one attempt, no waiting
 
 
 def test_delay_schedule_grows_and_is_capped():

@@ -7,6 +7,8 @@ drift between front-ends.
 
 from __future__ import annotations
 
+import re
+
 from copilot.chunking.errors import ChunkingError
 from copilot.embeddings.errors import EmbeddingError
 from copilot.ingestion.errors import IngestionError
@@ -79,3 +81,47 @@ def answer_warnings(answer: RagAnswer) -> list[str]:
             "and were not shown to the model."
         )
     return warnings
+
+
+# --- literal text in Markdown widgets ----------------------------------------------------------
+#
+# Streamlit renders most widget text (expander labels, st.error/st.success/st.caption bodies,
+# st.markdown) as Markdown. A repository path such as ``src/pkg/__init__.py`` therefore shows up
+# as ``src/pkg/<b>init</b>.py`` (the double underscores read as bold). Two helpers keep literal text
+# literal. Verified by rendering real Streamlit 1.67 in a browser (see docs/ui.md): ``st.selectbox``
+# option labels are NOT Markdown, so they must not be escaped (the backslashes would show).
+
+_PUNCTUATION = re.compile(r"([!-/:-@\[-`{-~])")
+
+
+def literal(text: str) -> str:
+    """An inline Markdown code span that displays ``text`` exactly as written.
+
+    Use it for a fragment inside a Markdown string (a path, a repository name, an index id) where
+    surrounding prose should still render normally. The fence is longer than any backtick run in
+    ``text`` so the text can never close the span early; a leading/trailing backtick is padded with
+    a space, which CommonMark strips. Newlines become spaces (a code span cannot contain them).
+    """
+    flat = " ".join(text.split("\n")) if text else ""
+    if not flat.strip():
+        return ""
+    longest = max((len(run) for run in re.findall(r"`+", flat)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if flat.startswith("`") or flat.endswith("`") else ""
+    return f"{fence}{pad}{flat}{pad}{fence}"
+
+
+def escape_markdown(text: str) -> str:
+    """Backslash-escape every ASCII punctuation character so Markdown shows ``text`` verbatim.
+
+    Use it for a whole message that is not meant to contain formatting (an error text). CommonMark
+    allows a backslash before any ASCII punctuation, which also stops ``:emoji:``, ``$latex$`` and
+    ``:red[colour]`` directives from being interpreted.
+    """
+    return _PUNCTUATION.sub(r"\\\1", text)
+
+
+def source_title(label: str, location: str, score: float, *, cited: bool) -> str:
+    """The expander title for one retrieved source; the location is shown literally."""
+    suffix = " (cited in the answer)" if cited else ""
+    return f"{escape_markdown(label)} - {literal(location)} - score {score:.3f}{suffix}"

@@ -260,7 +260,7 @@ uv run python -m copilot.evaluation summarize data\evaluation\compare-8.json
 committed. Each question is recorded with: the question, expected regions, the plain answer (or
 error), the RAG status/answer/sources/cited and unknown source numbers/retrieval and total latency,
 and empty `plain_rating` / `rag_rating` slots. A provider error or gate refusal on one question is
-recorded and the run continues, retrying a transient provider failure (HTTP 429/503) with a bounded backoff first - see "Resuming an interrupted or rate-limited run" below for what counts as transient, the retry/pacing distinction, and `--resume`, which continues an existing `--output` file instead of starting over.
+recorded and the run continues, retrying a transient provider failure (HTTP 429/503/504) with a bounded backoff first - see "Resuming an interrupted or rate-limited run" below for what counts as transient, the retry/pacing distinction, and `--resume`, which continues an existing `--output` file instead of starting over.
 
 ## Manual rubric (`answer-comparison/1`, also embedded in every file)
 
@@ -332,20 +332,22 @@ benchmark, the prompts, or any generation setting.
   whose `error` is not `null` is re-asked. If a question's plain side succeeded and its RAG side
   failed, resuming makes exactly one new hosted call for that question (RAG only), and
   vice versa; if both already succeeded, resuming that question makes zero hosted calls.
-* **Checkpointing is atomic and incremental.** After every question, the accumulated comparison
-  run is written to `--output` via `copilot.utils.atomic_file.write_text_atomically` (temp file in
+* **Checkpointing is atomic and incremental.** After every hosted side (Milestone 7.1; it was
+  once per question), the accumulated comparison run - always listing *every* requested question,
+  with `not_attempted` placeholders for the ones not reached - is written to `--output` via `copilot.utils.atomic_file.write_text_atomically` (temp file in
   the same directory, `fsync`, then one `os.replace`) - the same "write, sync, then rename"
   pattern `copilot.vectorstore.atomic` already uses for index directories, applied to a single
   JSON file instead of a directory of files. A reader (including a later `--resume`) only ever
   sees the previous complete file or the new complete file, never a half-written one. Ctrl+C, a
-  crash, or exhausting the retry budget on one question loses at most that one in-flight question
-  - every question completed before it stays on disk exactly as it was, and `KeyboardInterrupt`
+  crash, or exhausting the retry budget loses at most the one request in flight - every side
+  completed before it stays on disk exactly as it was, and `KeyboardInterrupt`
   is never caught and recorded as a fake model failure; it aborts the run immediately and `compare`
   reports where the checkpoint stopped.
 * **Retry backoff is separate from request pacing.** `--delay-seconds` (unchanged default `0.0`)
   still pauses after *every* request, successful or not - it paces a well-behaved run. The new
   `--retry-*` flags govern what happens only after a transient provider failure: HTTP 429
-  (`LLMRateLimitError`) or HTTP 503 (`LLMProviderError` with `status_code == 503`) - see
+  (`LLMRateLimitError`), HTTP 503 (`LLMProviderError` with `status_code == 503`) or HTTP 504
+  (`LLMTimeoutError` with `status_code == 504`) - see
   `copilot.llm.retry` for the full reasoning. Nothing else is retried: a bad model name, bad
   credentials, a blocked/malformed response, or the secret gate's refusal are fixed conditions
   that another identical attempt cannot change, so they are recorded immediately, exactly as
@@ -361,15 +363,112 @@ benchmark, the prompts, or any generation setting.
   both sides), and the output path. A question left with an error after retries keeps that typed
   error in the JSON so a later `--resume` can retry it again with a fresh backoff budget.
 
-Recommended command to resume the interrupted run against the existing index (a materially larger
-delay than the `1` second that was insufficient the first time; the retry flags use their
-defaults, shown here for clarity):
+## Stopping early on sustained rate limiting (Milestone 7.1)
+
+The second hosted attempt (`max_output_tokens=8192`) made 17 successful calls and then received
+HTTP 429 for every one of the next 25 questions, plus two HTTP 504 timeouts. Retrying with backoff
+cannot help when the provider keeps refusing, and each exhausted side cost about 75 seconds, so the
+run spent about 80 minutes on 51 doomed sides. A **circuit breaker** now sits above the retry layer.
+
+* **Side states.** Every side is `successful`, `failed` (a call was made and ended in an error) or
+  `not_attempted` (no call was ever made; stored as `not_attempted: true` on a plain record and
+  `status: "not_attempted"` on a RAG record). `compare` prints all three counts per system.
+* **The rule.** When `--max-consecutive-rate-limit-failures` (default 3; `0` disables) hosted
+  sides *in a row* have exhausted their retries with HTTP 429, the run stops, writes the checkpoint
+  and exits with code **3**. The streak counts only hosted calls that ended in a 429. A hosted
+  success resets it, and so does any other outcome, because the streak is *consecutive 429s*. A
+  side reused from `--resume` is not a hosted call and neither extends nor resets the streak. A 429
+  that a retry cleared is a success, not a failed side.
+* **What the message says.** "Stopped after N consecutive hosted request(s) ended in HTTP 429 (rate
+  or quota limit) after exhausting their retries. The provider did not say which limit was hit."
+  It deliberately does not say "daily quota exhausted": Gemini's error text does not name the limit
+  and this project does not guess. The reason is stored in the file as `stop_reason`.
+* **Nothing is lost.** The file written at the stop lists all questions. Successful answers, their
+  latencies and sources, and any ratings already entered are kept byte for byte. A later
+  `--resume` asks only the `failed` and `not_attempted` sides, and clears `stop_reason`.
+* **HTTP 504** (gateway timeout, `LLMTimeoutError` with `status_code == 504`) is now retried like
+  429/503, with the same bounded backoff. A client-side timeout (no HTTP response), HTTP 408,
+  authentication, configuration, model-not-found, blocked/malformed responses, other 4xx/5xx and
+  the secret gate's refusal are never retried.
+* **Benchmark drift is refused on resume.** If a question's text or expected regions in the file
+  differ from the benchmark you are resuming with, `compare` refuses before any call: the stored
+  retrieval hits would describe different regions.
+
+## Evaluating a frozen snapshot while the application keeps changing (Milestone 7.1)
+
+An index is valid only for the exact accepted source content it was built from (its
+`repository_fingerprint`, see `copilot.vectorstore.fingerprint`). The benchmark indexes this
+repository, so **every commit that touches an indexed file makes the live checkout stale** for the
+existing index, and `--repo .` is refused with "the repository does not match the index". The
+fix is to stop pointing the evaluation at the live checkout.
+
+| Thing | Where it lives | Changes when |
+|---|---|---|
+| application under development | the repository checkout | every commit |
+| repository being evaluated | `data/snapshots/<commit>/tree/` | never (frozen) |
+| vector index | `data/indexes/<index_id>/` | never (new id for any new spec) |
+| comparison results | `data/evaluation/<name>.json` | `--resume` fills it in |
+
+A snapshot is `git archive <commit>` extracted into the git-ignored `data/` directory (a `git
+worktree` would add branch/worktree state to `.git` and could be edited into a different state by
+mistake). `snapshot create --index ...` extracts into a staging directory, recomputes the
+fingerprint with the same ingestion the retriever uses, installs the tree only if it equals the
+index's fingerprint, and otherwise installs nothing. Index manifests and comparison files are never
+modified, and an existing snapshot is never overwritten. The metadata file `snapshot.json` sits next
+to `tree/` rather than inside it because `.json` is an accepted source extension and would change
+the fingerprint.
+
+**Which snapshot belongs to the current comparison.** `data/evaluation/compare-8192-4aaeab9c650ab76c.json`
+records index `4aaeab9c650ab76c`, whose manifest records fingerprint `e7709ab39fff91d4...`.
+Recomputing the fingerprint for each of the 18 commits (ignore directories `data`, `tests`,
+`submission`) matches exactly two: `a282ec4` and `166f48b`. They differ only in
+`benchmarks/*.jsonl`, which is not an accepted source extension. The comparison was run with the
+benchmark as re-anchored in `a282ec4`, so that is the snapshot to use. Between `a282ec4` and the
+7.1 work nothing changed under `rag/`, `retrieval/`, `embeddings/`, `chunking/`, `ingestion/`,
+`vectorstore/` or `config/`, and the 34 questions and regions in the benchmark equal those stored in
+the comparison file.
 
 ```powershell
-uv run python -m copilot.evaluation compare benchmarks\copilot_self_055a8d5.jsonl --repo . `
-    --index data\indexes\4aaeab9c650ab76c --output data\evaluation\compare.json --resume `
-    --delay-seconds 8 --retry-initial-delay 5 --retry-multiplier 2 --retry-max-delay 60 --retry-max-attempts 5
+# once: freeze the commit and verify it against the index (nothing is installed on a mismatch)
+uv run python -m copilot.evaluation snapshot create --commit a282ec4 `
+    --index data\indexes\4aaeab9c650ab76c --ignore-dir data --ignore-dir tests --ignore-dir submission
+
+# any time: re-check a snapshot
+uv run python -m copilot.evaluation snapshot verify `
+    --snapshot data\snapshots\a282ec471ebf1387cb4feafcfe732ad24a431c7a\tree `
+    --index data\indexes\4aaeab9c650ab76c --ignore-dir data --ignore-dir tests --ignore-dir submission
 ```
 
-If Gemini's quota is still exhausted, `--resume` can simply be run again later: every question
-already answered on both sides is reused unchanged and only the still-failing ones are retried.
+Rules for Milestones 8-10 and beyond: always pass the snapshot's `tree` as `--repo` for
+`compare`/`run`/`verify`; never rebuild `4aaeab9c650ab76c` or "re-anchor" the benchmark to a newer
+commit while a comparison against it is in progress; a *new* experiment (different chunking, new
+benchmark anchors) gets a new snapshot, a new index and a new comparison file, never a merge into
+the old one. Ingestion, line chunking and the fingerprint formula must keep reproducing the old
+chunks: a change there changes the fingerprint and `Retriever.open` will refuse the snapshot,
+which is the intended alarm.
+
+## Resuming the 8192-token comparison
+
+Copy the file first if you want a backup (a resume rewrites `--output`), then:
+
+```powershell
+copy data\evaluation\compare-8192-4aaeab9c650ab76c.json data\evaluation\compare-8192-4aaeab9c650ab76c.before-resume.json
+uv run python -m copilot.evaluation compare benchmarks\copilot_self_055a8d5.jsonl `
+    --repo data\snapshots\a282ec471ebf1387cb4feafcfe732ad24a431c7a\tree `
+    --index data\indexes\4aaeab9c650ab76c --output data\evaluation\compare-8192-4aaeab9c650ab76c.json `
+    --resume --delay-seconds 6
+```
+
+The file currently holds 8 complete pairs and one plain-only success; `--resume` would ask the
+other 51 sides. It stops after three consecutive 429s (exit code 3), so repeating this later costs
+only the calls that can still succeed. The `.env` must still say `COPILOT_LLM_MAX_OUTPUT_TOKENS=8192`
+and the same model, or the compatibility check refuses.
+
+## Runs that are kept but are not results
+
+* `compare-quota-failed-4aaeab9c650ab76c.json`: the first run (`max_output_tokens=1024`, mostly
+  HTTP 429; 5 of its 8 successful answers end mid-sentence). Invalid.
+* `compare.json` / `compare.backup.json`: a later all-429 run on a different index
+  (`e62c923901fcde16`). Invalid.
+* `compare-8192-4aaeab9c650ab76c.json`: the resumable run described above; not a result until it
+  is complete and rated.
