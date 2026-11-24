@@ -1,0 +1,151 @@
+{
+  "arms": [
+    {
+      "arm_id": "A",
+      "label": "baseline line windows (production)",
+      "params": {
+        "max_tokens": 512,
+        "overlap_lines": 10,
+        "size_lines": 60
+      },
+      "strategy": "line",
+      "strategy_version": 1
+    },
+    {
+      "arm_id": "B",
+      "label": "AST structure-aware (production, unchanged)",
+      "params": {
+        "fallback": "line@1",
+        "fallback_overlap_lines": 10,
+        "fallback_size_lines": 60,
+        "max_tokens": 512
+      },
+      "strategy": "ast",
+      "strategy_version": 1
+    },
+    {
+      "arm_id": "C",
+      "label": "size-matched line windows (Python window re-sized, no overlap)",
+      "params": {
+        "max_tokens": 512,
+        "overlap_lines": 10,
+        "python_overlap_lines": 0,
+        "python_size_lines": 15,
+        "size_lines": 60
+      },
+      "strategy": "line_sized",
+      "strategy_version": 1
+    },
+    {
+      "arm_id": "D",
+      "label": "AST with adjacent structural chunks merged",
+      "params": {
+        "base": "ast@1",
+        "fallback": "line@1",
+        "fallback_overlap_lines": 10,
+        "fallback_size_lines": 60,
+        "max_tokens": 512,
+        "merge_max_tokens": 512
+      },
+      "strategy": "ast_merged",
+      "strategy_version": 1
+    }
+  ],
+  "benchmark": {
+    "path": "benchmarks/copilot_self_055a8d5.jsonl",
+    "questions": 34,
+    "regions": 41,
+    "sha256": "8a0d0f4b880040540a5e09dc43dd1f005d883c26ed9821df7db3513a65a4f030"
+  },
+  "budget": {
+    "budgets": [
+      512,
+      1024,
+      2048
+    ],
+    "builder": "copilot.rag.context.build_context(preserve_order=False)",
+    "pool_depth": 30
+  },
+  "coverage": {
+    "threshold": 0.5
+  },
+  "embedding": {
+    "dimension": 768,
+    "model": "jinaai/jina-embeddings-v2-base-code",
+    "representation_version": 1,
+    "text_style": "prefixed"
+  },
+  "experiment": "chunking-comparison",
+  "fixed_k": {
+    "depth": 10,
+    "ks": [
+      1,
+      3,
+      5,
+      10
+    ],
+    "mrr_depth": 10
+  },
+  "ignore_directories": [
+    "data",
+    "tests",
+    "submission"
+  ],
+  "latency": {
+    "arm_order": "rotated by one position each repetition",
+    "depth": 10,
+    "repetitions": 5,
+    "warmup_queries": 3
+  },
+  "matching": {
+    "arm_c_adequate": true,
+    "arm_c_median_error": -0.02857142857142857,
+    "arm_d_adequate": false,
+    "arm_d_median_error": -0.21321961620469082,
+    "source": "experiments/chunking-comparison/design/matching.json",
+    "source_sha256": "a456f9c08aa77b03737727e150775befacf5b95c0349a083b15c6d9667d74516",
+    "tolerance": 0.1
+  },
+  "repository_name": "agentic-rag-code-copilot",
+  "schema": "chunking-experiment-config/1",
+  "snapshot": {
+    "commit": "a282ec471ebf1387cb4feafcfe732ad24a431c7a",
+    "tree": "data/snapshots/a282ec471ebf1387cb4feafcfe732ad24a431c7a/tree"
+  },
+  "statistics": {
+    "bootstrap_resamples": 20000,
+    "comparisons": [
+      [
+        "B",
+        "A"
+      ],
+      [
+        "B",
+        "C"
+      ],
+      [
+        "C",
+        "A"
+      ],
+      [
+        "D",
+        "A"
+      ],
+      [
+        "D",
+        "B"
+      ]
+    ],
+    "confidence": 0.95,
+    "multiple_comparisons": "Holm over all non-primary McNemar tests",
+    "primary": {
+      "alpha": 0.05,
+      "comparison": [
+        "B",
+        "A"
+      ],
+      "endpoint": "hit@5"
+    },
+    "seed": 20261027
+  }
+}

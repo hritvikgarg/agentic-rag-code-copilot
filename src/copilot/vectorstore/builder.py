@@ -124,6 +124,7 @@ def expectation_for_repository(
     ignore_directories: Sequence[str] = (),
     text_style: TextStyle | None = None,
     chunking_strategy: str | None = None,
+    chunker: Chunker | None = None,
 ) -> IndexExpectation:
     """What an index of ``root`` should look like under the current configuration.
 
@@ -134,7 +135,9 @@ def expectation_for_repository(
     """
     settings = settings or get_settings()
     ingestion = _ingest(root, settings, repository_name, ignore_directories)
-    chunker = create_chunker(chunking_strategy, settings=settings)
+    if chunker is not None and chunking_strategy is not None:
+        raise ValueError("pass either chunker or chunking_strategy, not both")
+    chunker = chunker or create_chunker(chunking_strategy, settings=settings)
     return IndexExpectation(
         repository_name=ingestion.repository_name,
         repository_fingerprint=repository_fingerprint(ingestion.files),
@@ -162,6 +165,7 @@ def build_repository_index(
     overwrite: bool = False,
     allow_truncated: bool = False,
     chunking_strategy: str | None = None,
+    chunker: Chunker | None = None,
 ) -> BuildReport:
     """Ingest, chunk, embed and index ``root``, then atomically save the index.
 
@@ -173,6 +177,8 @@ def build_repository_index(
         IndexExistsError: the same index already exists and ``overwrite`` is false.
 
     ``chunking_strategy`` (``"line"`` or ``"ast"``) overrides ``settings.chunking_strategy``.
+    ``chunker`` supplies a ready-made chunker instead (used by the Milestone 10 experiment for its
+    experimental controls); it is mutually exclusive with ``chunking_strategy``.
     """
     settings = settings or get_settings()
     style: TextStyle = text_style or settings.embedding_text_style
@@ -188,7 +194,9 @@ def build_repository_index(
     if not ingestion.files:
         raise EmptyIndexError("the repository has no accepted files to index")
 
-    chunker = create_chunker(chunking_strategy, settings=settings)
+    if chunker is not None and chunking_strategy is not None:
+        raise ValueError("pass either chunker or chunking_strategy, not both")
+    chunker = chunker or create_chunker(chunking_strategy, settings=settings)
     chunking = chunk_repository(ingestion, chunker)
     chunks = sort_chunks_canonically(chunking.chunks)
     after_chunk = time.perf_counter()

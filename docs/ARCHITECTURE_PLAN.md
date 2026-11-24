@@ -10,7 +10,7 @@ Confidence tags used throughout: **[Certain]** verified from a primary source or
 
 1. **Embedding-only retrieval will fail on some of your own example questions.** "Where is this function used?" and "Which files implement user registration?" depend on exact identifiers and call sites. Dense embeddings blur identifiers. This plan therefore adds a lexical retriever and a deterministic AST usage finder, and measures them as ablations. [Likely]
 2. **Your Experiment 1 can be invalidated by benchmark choice.** If you benchmark on a famous repo (Flask, Django, requests), the plain LLM has probably memorised it, and "RAG beats plain LLM" shrinks or vanishes. Benchmark on at least one repo the model cannot have seen (this project itself, or a small unpopular repo) and report both. [Likely]
-3. **With 30–60 benchmark questions, differences under roughly 10 percentage points are noise.** We report raw counts, not just percentages, and never claim significance we did not test. [Certain — small-sample arithmetic]
+3. With 34 questions, one additional successful retrieval changes Hit@k by approximately 2.94 percentage points. Statistical uncertainty must be assessed using paired outcomes and appropriate uncertainty estimates. No arbitrary noise threshold is assumed.
 4. **19 milestones is more than a semester of casual work if all are done deeply.** This plan defines a cut line (Section 9) so the core MVP plus both experiments are protected and the tail (deployment polish, extra languages) is what slips. [Likely]
 5. **Structure-aware chunking will look better or worse for reasons unrelated to structure** unless we control chunk size, embedding model, k and dedup. Experiment 2 is only meaningful with those controls (Section 7). [Certain]
 

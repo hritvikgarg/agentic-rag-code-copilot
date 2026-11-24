@@ -44,6 +44,7 @@ class ChunkType(StrEnum):
     FUNCTION = "function"  # a module-level function (or a part of one that was too large)
     METHOD = "method"  # a function defined directly in a class body
     CLASS = "class"  # a whole class, or the non-method parts of a class that was split
+    MERGED = "merged"  # several adjacent AST units merged (experimental "ast_merged" only)
 
 
 # How a chunk's boundaries were decided (``None`` for the baseline strategy, which has no notion

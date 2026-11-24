@@ -1,5 +1,9 @@
 """Chunking strategy registry: strategy name (from ``Settings``) -> ``Chunker`` instance.
 
+The experimental controls of Milestone 10 (``line_sized``, ``ast_merged``) are deliberately absent
+from ``_FACTORIES``: they are not selectable by name, only rebuilt from an index manifest by
+``create_chunker_from_params``.
+
 Two strategies are implemented: ``"line"`` (baseline, the default) and ``"ast"`` (structure-aware
 Python chunking, Milestone 9). Selecting one never silently falls back to the other: an unknown or
 unimplemented name fails loudly, which keeps the two-strategy experiment honest. ``_RESERVED`` is
@@ -16,6 +20,12 @@ from copilot.chunking.errors import (
     ChunkingError,
     StrategyNotImplementedError,
     UnknownChunkingStrategyError,
+)
+from copilot.chunking.experimental import (
+    MERGED_STRATEGY_NAME,
+    SIZED_STRATEGY_NAME,
+    MergedAstChunker,
+    SizedLineChunker,
 )
 from copilot.chunking.line_chunker import LineChunker
 from copilot.config.settings import Settings, get_settings
@@ -92,6 +102,36 @@ def create_chunker_from_params(name: str, version: int, params: Mapping[str, int
                 f"invalid chunking parameters for {name!r}: {dict(params)}"
             ) from exc
         if dict(params) != chunker.params():  # e.g. the line splitter version changed
+            raise ChunkingError(
+                f"the index was built with {name!r} parameters {dict(params)}, this code uses "
+                f"{chunker.params()}: chunk ids would differ; rebuild the index"
+            )
+    elif name == SIZED_STRATEGY_NAME:  # experimental control (Milestone 10); not in _FACTORIES
+        try:
+            chunker = SizedLineChunker(
+                python_size_lines=int(params["python_size_lines"]),
+                python_overlap_lines=int(params["python_overlap_lines"]),
+                size_lines=int(params["size_lines"]),
+                overlap_lines=int(params["overlap_lines"]),
+                max_tokens=int(params["max_tokens"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ChunkingError(
+                f"invalid chunking parameters for {name!r}: {dict(params)}"
+            ) from exc
+    elif name == MERGED_STRATEGY_NAME:  # experimental control (Milestone 10); not in _FACTORIES
+        try:
+            chunker = MergedAstChunker(
+                max_tokens=int(params["max_tokens"]),
+                fallback_size_lines=int(params["fallback_size_lines"]),
+                fallback_overlap_lines=int(params["fallback_overlap_lines"]),
+                merge_max_tokens=int(params["merge_max_tokens"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ChunkingError(
+                f"invalid chunking parameters for {name!r}: {dict(params)}"
+            ) from exc
+        if dict(params) != chunker.params():
             raise ChunkingError(
                 f"the index was built with {name!r} parameters {dict(params)}, this code uses "
                 f"{chunker.params()}: chunk ids would differ; rebuild the index"

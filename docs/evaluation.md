@@ -70,7 +70,7 @@ newer working tree, where the regions will legitimately have moved.
 - **Not independent.** The same author wrote the code, the documentation and the questions, and knows
   the vocabulary. Results are optimistic and say nothing about unfamiliar repositories. A later
   milestone should add at least one unfamiliar open-source repository.
-- Small. Differences of a few questions are noise.
+- Small (34 questions): one question changes Hit@k by about 2.94 percentage points. Uncertainty must be assessed with paired outcomes and uncertainty intervals (Milestone 10); no noise threshold is assumed.
 - The index was built with `--ignore-dir data --ignore-dir tests --ignore-dir submission`, so tests
   (natural distractors) are not in the corpus.
 - Documentation is in the corpus and ranks above code for many questions. Whether that counts as a
