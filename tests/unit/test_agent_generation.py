@@ -104,3 +104,26 @@ def test_partial_evidence_after_exhaustion_is_flagged_not_hidden():
     assert result.generated
     assert result.assessment.outcome is AssessmentOutcome.EXHAUSTED
     assert result.termination is TerminationReason.NO_NEW_QUERY
+
+
+def test_partial_evidence_is_machine_readable_for_every_consumer():
+    wf, _ = workflow(ScriptedRetriever([[chunk("nothing relevant", path="src/x.py")]]))
+    result = wf.run("authentication")
+    assert result.evidence_status == "partial" and result.generated
+    assert len(result.warnings) == 1 and result.warnings[0].startswith("partial_evidence:")
+    dumped = result.model_dump()  # serialised results (UI, evaluation) carry the same fields
+    assert dumped["evidence_status"] == "partial" and dumped["warnings"] == result.warnings
+
+
+def test_sufficient_and_absent_evidence_have_their_own_status_and_no_partial_warning():
+    wf, _ = workflow(ScriptedRetriever([EVIDENCE]))
+    ok = wf.run(QUESTION)
+    assert ok.evidence_status == "potentially_sufficient" and ok.warnings == ()
+    wf, llm = workflow(ScriptedRetriever([[]]))
+    none = wf.run(QUESTION)
+    assert none.evidence_status == "none" and none.warnings == () and llm.call_count == 0
+
+
+def test_unknown_source_labels_are_surfaced_as_a_warning():
+    wf, _ = workflow(ScriptedRetriever([EVIDENCE]), FakeLLMClient("see [Source 7]"))
+    assert any(w.startswith("unknown_source_labels") for w in wf.run(QUESTION).warnings)

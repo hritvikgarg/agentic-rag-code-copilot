@@ -71,12 +71,8 @@ def format_result(result: AgentResult, *, show_trace: bool = False) -> str:
             lines.append(f"[{c.label}] {c.location}  (rank {c.rank}, score {c.score:.4f})")
     else:
         lines.append("(none)")
-    if answer is not None and answer.unknown_source_numbers:
-        numbers = ", ".join(str(n) for n in answer.unknown_source_numbers)
-        lines += [
-            "",
-            f"warning: the answer mentions source numbers that were not supplied: {numbers}",
-        ]
+    for warning in result.warnings:
+        lines += ["", f"warning: {warning}"]
 
     lines += ["", "WORKFLOW"]
     lines.append(f"intent: {result.decision.intent.value} (rule {result.decision.rule_id})")
@@ -90,11 +86,7 @@ def format_result(result: AgentResult, *, show_trace: bool = False) -> str:
             + ")"
         )
     lines.append(f"termination: {result.termination.value}")
-    if result.assessment is not None and result.assessment.outcome.value == "exhausted":
-        lines.append(
-            "warning: the evidence heuristic was not satisfied within the retrieval budget; "
-            "the answer is based on partial evidence."
-        )
+    lines.append(f"evidence: {result.evidence_status}")
     if answer is not None and answer.generation is not None:
         g = answer.generation
         lines.append(f"model: {g.provider}/{g.model}  finish: {g.finish_reason}")

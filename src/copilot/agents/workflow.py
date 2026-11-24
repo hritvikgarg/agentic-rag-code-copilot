@@ -29,7 +29,7 @@ import time
 from typing import Literal
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from copilot.agents.assessment import assess_evidence
 from copilot.agents.evidence import arrange_evidence, merge_evidence
@@ -86,6 +86,38 @@ class AgentResult(BaseModel):
     @property
     def generated(self) -> bool:
         return self.answer is not None and self.answer.status is AnswerStatus.ANSWERED
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def evidence_status(self) -> Literal["potentially_sufficient", "partial", "none"]:
+        """How much to trust that retrieval found what the question needs (a heuristic, see
+        ``assessment.py``). ``partial`` means evidence exists but the heuristic was NOT satisfied
+        within the budget: an answer built on it must not be presented as evidence-complete."""
+        if self.evidence_count == 0:
+            return "none"
+        if (
+            self.assessment is not None
+            and self.assessment.outcome is AssessmentOutcome.POTENTIALLY_SUFFICIENT
+        ):
+            return "potentially_sufficient"
+        return "partial"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        """Caveats every consumer (CLI, UI, evaluation) should show next to the answer."""
+        found: list[str] = []
+        if self.evidence_status == "partial":
+            reason = self.assessment.reason if self.assessment else "unknown"
+            found.append(
+                "partial_evidence: the evidence check was not satisfied "
+                f"({reason}; stopped by {self.termination.value}); the answer rests on "
+                "incomplete repository evidence"
+            )
+        if self.answer is not None and self.answer.unknown_source_numbers:
+            numbers = ", ".join(str(n) for n in self.answer.unknown_source_numbers)
+            found.append(f"unknown_source_labels: the answer mentions unsupplied sources {numbers}")
+        return tuple(found)
 
 
 def _fingerprint(query: str) -> str:

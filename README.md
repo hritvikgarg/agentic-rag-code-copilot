@@ -4,11 +4,14 @@ An academic project: a repository-aware AI assistant that answers questions abou
 using evidence retrieved from that codebase, and cites the files, functions and line ranges
 it used.
 
-> **Status: Milestone 5c (content-secret scanner and external-LLM gate).** The foundation,
-> repository ingestion, baseline chunking, a local embedding service, a persistent vector index,
-> semantic retrieval (no LLM), a retrieval benchmark harness and a content-based secret scanner
-> with a fail-closed gate exist. The RAG pipeline, LLM
-> answers, agents and the UI described below are **planned and do not exist yet.** See
+> **Status: Milestone 8 (agentic LangGraph workflow), plus stabilization.** Implemented: safe
+> ingestion, baseline chunking, local embeddings, a FAISS index, semantic retrieval, a content-secret
+> scanner with a fail-closed gate, a plain-LLM baseline and grounded RAG with citations, a
+> Streamlit UI over a service layer, a plain-vs-RAG comparison framework (resumable, with a
+> quota circuit breaker), and a bounded agentic RAG workflow. **No result in this repository
+> shows that RAG, or the agentic workflow, answers better than a plain LLM or than baseline RAG:
+> the comparison is not yet complete or rated, and the agent has only been tested offline.**
+> Structure-aware chunking, the chunking experiment and debugging assistance are **planned.** See
 > [Current implementation status](#current-implementation-status).
 
 ## Academic context
@@ -39,7 +42,7 @@ small teams working with medium-sized repositories.
 6. Provide evidence-based debugging help, clearly separating evidence from hypotheses.
 7. Measure it: plain LLM vs repository-aware RAG, and baseline vs structure-aware chunking.
 
-## High-level architecture (planned)
+## High-level architecture (target design)
 
 ```
 Indexing (offline)
@@ -66,10 +69,10 @@ The full design, technology decisions, milestones and evaluation plan are in
 | Vector index | FAISS `IndexFlatIP` (exact) + JSONL sidecar + manifest, atomic save | **Implemented and validated on Windows with the real model (Milestone 5a)** |
 | Semantic retrieval | Query embedding -> exact FAISS search -> verified source text (no LLM) | **Implemented (Milestone 5b)** |
 | Retrieval evaluation | Hit@k, MRR, mean lines per hit; JSONL benchmark; cap x representation matrix | **Implemented (Milestone 5b); benchmark is not independent** |
-| Secret scanner | Content scan (private keys, provider tokens, secret-like assignments) + fail-closed gate | **Implemented (Milestone 5c); not yet wired: no LLM path exists** |
-| LLM | Gemini via `google-genai`; Ollama optional fallback | Planned (Milestone 6) |
-| Interface | Streamlit | Planned (Milestone 7) |
-| Orchestration | LangGraph | Planned (Milestone 8) |
+| Secret scanner | Content scan (private keys, provider tokens, secret-like assignments) + fail-closed gate | **Implemented (Milestone 5c); wired in front of every hosted-LLM request (Milestone 6)** |
+| LLM | Gemini via `google-genai` (an Ollama fallback is not implemented) | **Implemented (Milestone 6)** |
+| Interface | Streamlit over `CopilotService` | **Implemented (Milestone 7)** |
+| Orchestration | LangGraph 1.x | **Implemented (Milestone 8; offline-tested, quality not measured)** |
 | Parsing | Python `ast` for structure-aware chunking | Planned (Milestone 9) |
 
 ## Repository structure
@@ -92,20 +95,22 @@ agentic-rag-code-copilot/
 │   ├── security/           # IMPLEMENTED: content-secret scanner, external-LLM gate, CLI
 │   ├── llm/                # IMPLEMENTED: LLMClient, Gemini, fake, guarded client (Milestone 6)
 │   ├── rag/                # IMPLEMENTED: plain baseline, context, citations, RagService, CLI
-│   ├── parsing/ agents/ services/
-│   │                       # PLANNED: currently docstring-only packages
+│   ├── agents/             # IMPLEMENTED: LangGraph agentic RAG workflow (Milestone 8)
+│   ├── services/           # IMPLEMENTED: CopilotService and presentation helpers for the UI
+│   ├── parsing/            # PLANNED: docstring-only package (structure-aware chunking, Milestone 9)
+├── ui/                     # IMPLEMENTED: Streamlit app (streamlit_app.py)
+├── benchmarks/             # the repository-question benchmark used by the evaluation commands
 ├── tests/                  # unit/ integration/ security/ + fixtures/ (synthetic repository builder)
 ├── docs/                   # ARCHITECTURE_PLAN.md, ingestion.md, chunking.md, embeddings.md, vector-index.md,
-│                           # retrieval.md, evaluation.md, security.md, llm.md, rag.md
+│                           # retrieval.md, evaluation.md, security.md, llm.md, rag.md, ui.md, agent.md
 └── data/                   # local runtime data; contents are git-ignored
 ```
 
-Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmarks/`,
-`results/` (Milestones 5 and 10).
+Directories still to be added when first needed: `scripts/`, `results/` (Milestone 10).
 
 ## Current implementation status
 
-**Implemented now (Milestones 1-6)**
+**Implemented now (Milestones 1-8)**
 
 - Project packaging and dependency configuration (`pyproject.toml`).
 - Typed configuration with validation and safe defaults (`copilot.config.Settings`).
@@ -185,6 +190,12 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   subset of the benchmark, and `summarize` aggregates *manual* rubric ratings (correctness,
   citation correctness, hallucinated claims, completeness, abstention). The LLM is not used as a
   judge. No results exist yet. Plan and limits: [`docs/evaluation.md`](docs/evaluation.md).
+- **Streamlit interface and service layer** (`ui/streamlit_app.py`, `copilot.services`, Milestones 7
+  and 7.1): index a repository, ask questions, see the answer with literal-rendered file citations
+  and retrieval statistics. Run: `uv sync --group ui` then `uv run --group ui streamlit run
+  ui/streamlit_app.py`. The comparison runner can resume after interruption, stops after repeated
+  quota errors, and verifies an immutable repository snapshot against the index. Details:
+  [`docs/ui.md`](docs/ui.md), [`docs/evaluation.md`](docs/evaluation.md).
 - **Agentic RAG workflow** (`copilot.agents`, Milestone 8): a LangGraph graph (`classify_intent ->
   retrieve -> merge_evidence -> assess_evidence -> refine | generate | abstain`) with a
   deterministic intent router, intent-specific retrieval plans, bounded multi-round retrieval, a
@@ -196,9 +207,10 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
 
 **Planned (not implemented; do not expect these to work)**
 
-Measured plain-vs-RAG results (the framework exists, the ratings do not), lexical/hybrid retrieval,
-Streamlit UI, LangGraph workflow, structure-aware chunking, debugging assistance, and an evaluation
-on an independent repository.
+Measured plain-vs-RAG results (the framework exists; the hosted comparison is incomplete and
+unrated), lexical/hybrid retrieval, structure-aware chunking and its experiment, evidence-based
+debugging assistance, an agentic-vs-baseline evaluation, and an evaluation on an independent
+repository.
 
 ## Setup (current milestone)
 
@@ -210,8 +222,8 @@ cd agentic-rag-code-copilot
 uv sync                      # creates .venv with Python 3.12 and installs dependencies
 ```
 
-Optional configuration (nothing needs a key yet; the LLM model ID is intentionally unset until
-Milestone 6):
+Optional configuration (only commands that call a hosted model need a key and a model ID, which is
+intentionally never defaulted; `--fake-llm` and the retrieval commands need neither):
 
 ```bash
 cp .env.example .env         # Windows PowerShell: Copy-Item .env.example .env
@@ -289,9 +301,10 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | 5b | Semantic retrieval and retrieval evaluation | **Done (matrix run on Windows; results in `docs/evaluation.md`)** |
 | 5c | Content-secret scanner and external-LLM gate | **Done** |
 | 6 | Basic RAG + plain-LLM baseline + comparison framework | **Done (unit-tested with fakes; live verification is manual; results not yet measured)** |
-| 7 | Streamlit MVP | Planned |
+| 7 | Streamlit MVP (`CopilotService` + UI) | **Done** |
+| 7.1 | Evaluation resilience (resume, circuit breaker, snapshot isolation) | **Done** |
 | 8 | LangGraph agentic workflow | **Done (offline-tested with fakes; quality not measured)** |
-| 9-11 | Structure-aware chunking, two experiments | Planned |
+| 9-11 | Structure-aware chunking, chunking experiment, remaining deliverables | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |
 
 ## Security note

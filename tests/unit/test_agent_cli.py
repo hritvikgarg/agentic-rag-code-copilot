@@ -172,3 +172,14 @@ def test_the_baseline_cli_is_unchanged_and_independent():
     assert "copilot.agents" not in source
     with pytest.raises(SystemExit):
         rag_cli.main(["agents"])  # not a baseline subcommand
+
+
+def test_partial_evidence_is_flagged_in_the_cli_output(capsys, monkeypatch):
+    monkeypatch.setattr(
+        cli.Retriever,
+        "open",
+        staticmethod(lambda *a, **k: ScriptedRetriever([[chunk("nothing relevant", path="x.py")]])),
+    )
+    code, out, _ = run(capsys, "ask", "idx", "--repo", "r", "--fake-llm", "authentication")
+    assert code == 0
+    assert "evidence: partial" in out and "warning: partial_evidence:" in out
