@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 
 import pytest
@@ -26,6 +27,7 @@ from copilot.evaluation.chunking_experiment.profile import profile_by_scope, pro
 from copilot.models.ingestion import IngestionResult
 from tests.ast_helpers import ast_chunker, line_chunker
 from tests.chunking_helpers import make_file
+from tests.fs_helpers import make_symlink_or_skip, symlink_not_permitted
 
 
 def _profile_of(median: float, mean: float):
@@ -148,9 +150,37 @@ def test_artifact_symlink_escape_is_rejected(tmp_path):
     outside.mkdir()
     base = tmp_path / "base"
     base.mkdir()
-    (base / "link").symlink_to(outside, target_is_directory=True)
+    make_symlink_or_skip(base / "link", outside, is_dir=True)
     with pytest.raises(ArtifactError):
         safe_artifact_path(base, "link/x.json")
+
+
+def test_symlink_helper_skips_only_for_permission_style_errors():
+    privilege = OSError(22, "A required privilege is not held by the client")
+    privilege.winerror = 1314  # type: ignore[attr-defined]
+    assert symlink_not_permitted(privilege)
+    assert symlink_not_permitted(PermissionError(errno.EPERM, "not permitted"))
+    assert symlink_not_permitted(NotImplementedError())
+    # real problems are never turned into skips
+    assert not symlink_not_permitted(FileNotFoundError(errno.ENOENT, "no parent"))
+    assert not symlink_not_permitted(FileExistsError(errno.EEXIST, "exists"))
+    assert not symlink_not_permitted(OSError(errno.ENOSPC, "disk full"))
+    assert not symlink_not_permitted(ValueError("bug"))
+
+
+def test_symlink_helper_skips_on_missing_privilege_but_propagates_other_errors(tmp_path):
+    class Denied:
+        def symlink_to(self, target, target_is_directory=False):
+            raise PermissionError(errno.EPERM, "not permitted")
+
+    class Broken:
+        def symlink_to(self, target, target_is_directory=False):
+            raise FileNotFoundError(errno.ENOENT, "missing parent")
+
+    with pytest.raises(pytest.skip.Exception):
+        make_symlink_or_skip(Denied(), tmp_path)
+    with pytest.raises(FileNotFoundError):
+        make_symlink_or_skip(Broken(), tmp_path)
 
 
 # --- frozen config -----------------------------------------------------------------------------
