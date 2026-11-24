@@ -78,6 +78,19 @@ class Settings(BaseSettings):
     chunk_max_tokens: int = Field(default=512, ge=16, le=8192)
     retrieval_top_k: int = Field(default=5, ge=1, le=50)
 
+    # --- Agentic workflow (Milestone 8; separate from the baseline retrieval settings above) ---
+    # Retrieval rounds per question, including the first one. Bounded so the loop cannot run away.
+    agent_max_retrieval_rounds: int = Field(default=3, ge=1, le=5)
+    # Cap on the evidence accumulated across rounds (the prompt is further limited by
+    # rag_context_max_tokens).
+    agent_max_evidence_chunks: int = Field(default=15, ge=1, le=50)
+    # Fraction of the question's key terms that must appear in the evidence before the heuristic
+    # calls it potentially sufficient. A lexical-coverage heuristic, NOT a relevance probability;
+    # the default is untuned and is to be evaluated, see docs/agent.md.
+    agent_min_term_coverage: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Architecture questions need evidence from at least this many distinct files.
+    agent_architecture_min_files: int = Field(default=2, ge=1, le=10)
+
     # --- Repository ingestion limits ---
     max_file_size_bytes: int = Field(default=500_000, ge=1_000)
     max_repo_files: int = Field(default=10_000, ge=1)

@@ -185,6 +185,13 @@ Directories added when first needed: `ui/` (Milestone 7), `scripts/`, `benchmark
   subset of the benchmark, and `summarize` aggregates *manual* rubric ratings (correctness,
   citation correctness, hallucinated claims, completeness, abstention). The LLM is not used as a
   judge. No results exist yet. Plan and limits: [`docs/evaluation.md`](docs/evaluation.md).
+- **Agentic RAG workflow** (`copilot.agents`, Milestone 8): a LangGraph graph (`classify_intent ->
+  retrieve -> merge_evidence -> assess_evidence -> refine | generate | abstain`) with a
+  deterministic intent router, intent-specific retrieval plans, bounded multi-round retrieval, a
+  lexical evidence heuristic and a structured trace. Generation reuses the baseline's guarded RAG
+  path. CLI: `python -m copilot.agents ask INDEX_DIR --repo PATH "question" [--max-rounds N]
+  [--trace] [--fake-llm]`. **Tested offline with fakes; no claim is made that it answers better than
+  baseline RAG.** Details: [`docs/agent.md`](docs/agent.md).
 - Unit, integration and security tests for the above (run against synthetic repositories).
 
 **Planned (not implemented; do not expect these to work)**
@@ -283,7 +290,8 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | 5c | Content-secret scanner and external-LLM gate | **Done** |
 | 6 | Basic RAG + plain-LLM baseline + comparison framework | **Done (unit-tested with fakes; live verification is manual; results not yet measured)** |
 | 7 | Streamlit MVP | Planned |
-| 8-11 | LangGraph, structure-aware chunking, two experiments | Planned |
+| 8 | LangGraph agentic workflow | **Done (offline-tested with fakes; quality not measured)** |
+| 9-11 | Structure-aware chunking, two experiments | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |
 
 ## Security note

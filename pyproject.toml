@@ -10,6 +10,7 @@ dependencies = [
     "faiss-cpu>=1.15,<2",
     "fastembed>=0.8,<0.9",
     "google-genai>=2.24.0",
+    "langgraph>=1.0,<2",
     "numpy>=1.26",
     "pydantic-settings>=2.4",
 ]

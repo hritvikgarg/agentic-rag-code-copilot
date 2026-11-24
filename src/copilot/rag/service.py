@@ -96,7 +96,29 @@ class RagService:
         started = time.perf_counter()
         results: Sequence[RetrievalResult] = self._retriever.retrieve(text, k)
         retrieval_seconds = round(time.perf_counter() - started, 3)
+        return self._answer_from(text, results, retrieval_seconds)
 
+    def answer_from_evidence(
+        self,
+        question: str,
+        results: Sequence[RetrievalResult],
+        *,
+        retrieval_seconds: float = 0.0,
+    ) -> RagAnswer:
+        """Everything after retrieval, for evidence that was retrieved elsewhere.
+
+        Used by the agentic workflow (``copilot.agents``), which may retrieve in several rounds.
+        It is exactly the second half of ``answer``: bound the context, abstain without calling the
+        model when nothing fits, scan the exact outbound text (twice), call the guarded client and
+        derive the citations from the evidence that actually entered the prompt. The prompts,
+        prompt versions and limits are the baseline's; nothing here is agent-specific.
+        """
+        return self._answer_from(validate_query(question), results, retrieval_seconds)
+
+    def _answer_from(
+        self, text: str, results: Sequence[RetrievalResult], retrieval_seconds: float
+    ) -> RagAnswer:
+        settings = self._settings
         context = build_context(results, settings.rag_context_max_tokens)
         common = {
             "question": text,
