@@ -19,10 +19,10 @@ def test_cli_json_output(tmp_path, capsys):
     assert payload["params"]["size_lines"] == 60
 
 
-def test_cli_reserved_strategy_is_an_error_not_a_fallback(tmp_path, capsys):
+def test_cli_unknown_strategy_is_an_error_not_a_fallback(tmp_path, capsys):
     (tmp_path / "a.py").write_text("x = 1\n")
-    assert main([str(tmp_path), "--strategy", "ast"]) == 2
-    assert "Milestone 9" in capsys.readouterr().err
+    assert main([str(tmp_path), "--strategy", "semantic"]) == 2
+    assert "unknown chunking strategy" in capsys.readouterr().err
 
 
 def test_cli_invalid_repository_is_an_error(tmp_path, capsys):

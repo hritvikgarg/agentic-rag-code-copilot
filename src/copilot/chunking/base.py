@@ -1,6 +1,6 @@
 """The chunker interface and shared helpers.
 
-Every strategy (baseline line windows now, AST structure-aware in Milestone 9) implements the
+Every strategy (baseline line windows, AST structure-aware since Milestone 9) implements the
 same tiny ``Chunker`` protocol, so the indexer, retriever and evaluation harness never need to
 know which strategy produced a chunk. That is what makes the two-strategy experiment fair.
 """
@@ -8,12 +8,20 @@ know which strategy produced a chunk. That is what makes the two-strategy experi
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Protocol
 
 from copilot.chunking.errors import ChunkingError
 from copilot.chunking.stats import compute_stats
 from copilot.chunking.windows import Window, split_lines
-from copilot.models.chunk import Chunk, ChunkingResult, ChunkType, make_chunk_id, sha256_text
+from copilot.models.chunk import (
+    Chunk,
+    ChunkingResult,
+    ChunkType,
+    Segmentation,
+    make_chunk_id,
+    sha256_text,
+)
 from copilot.models.ingestion import IngestionResult, SourceFile
 from copilot.utils.tokens import estimate_tokens
 
@@ -40,6 +48,15 @@ class Chunker(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class SymbolInfo:
+    """Symbol metadata for a structure-aware chunk (all ``None`` for the baseline)."""
+
+    name: str | None = None
+    qualified_name: str | None = None
+    parent_class: str | None = None
+
+
 def build_chunk(
     file: SourceFile,
     chunker: Chunker,
@@ -47,8 +64,15 @@ def build_chunk(
     index: int,
     window: Window,
     chunk_type: ChunkType,
+    symbol: SymbolInfo | None = None,
+    segmentation: Segmentation | None = None,
 ) -> Chunk:
-    """Create a validated ``Chunk`` from a window of ``file`` (id per ``make_chunk_id``)."""
+    """Create a validated ``Chunk`` from a window of ``file`` (id per ``make_chunk_id``).
+
+    ``symbol`` and ``segmentation`` are used by the structure-aware strategy only; they are not
+    part of the chunk id, and the baseline never passes them.
+    """
+    symbol = symbol or SymbolInfo()
     return Chunk(
         chunk_id=make_chunk_id(
             repository_name=file.repository_name,
@@ -76,6 +100,10 @@ def build_chunk(
         token_estimate=estimate_tokens(window.content),
         fragment_index=window.fragment_index,
         fragment_count=window.fragment_count,
+        symbol_name=symbol.name,
+        qualified_name=symbol.qualified_name,
+        parent_class=symbol.parent_class,
+        segmentation=segmentation,
     )
 
 

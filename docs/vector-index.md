@@ -81,7 +81,8 @@ Each line is a `ChunkRecord`:
 | `source_sha256`, `content_sha256` | hashes of the source file bytes and of the chunk text |
 | `token_estimate` | heuristic token estimate |
 | `fragment_index`, `fragment_count` | set only for a piece of an over-long line |
-| `symbol_name`, `qualified_name`, `parent_class` | reserved for structure-aware chunks (null now) |
+| `symbol_name`, `qualified_name`, `parent_class` | set by the structure-aware `ast` strategy (null for the baseline) |
+| `segmentation` | `ast`, `ast_split` or `fallback` (Milestone 9); **omitted** when null, so baseline sidecars are byte-identical to those written before Milestone 9 |
 
 Repository name and chunking strategy/parameters are identical for all records, so they are stored
 once in the manifest.

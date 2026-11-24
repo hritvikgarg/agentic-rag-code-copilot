@@ -1,8 +1,8 @@
 """Chunk schema shared by every chunking strategy (Milestone 3 onwards).
 
 A *chunk* is the unit that is embedded, indexed, retrieved and cited. The schema is strategy
-neutral: the baseline line-window strategy leaves the symbol fields ``None``; the structure-aware
-strategy (Milestone 9) will fill them and add its own chunk types.
+neutral: the baseline line-window strategy leaves the symbol fields and ``segmentation`` ``None``;
+the structure-aware ``"ast"`` strategy (Milestone 9) fills them and adds its own chunk types.
 
 Invariants (enforced by the model or the chunkers, and covered by tests):
 
@@ -23,6 +23,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -32,9 +33,27 @@ CHUNK_ID_SCHEMA = "chunk-id/1"  # bump if the id formula or serialisation ever c
 
 
 class ChunkType(StrEnum):
-    """What kind of unit a chunk is. Structure-aware types are added in Milestone 9."""
+    """What kind of unit a chunk is.
+
+    ``LINE_WINDOW`` is the baseline unit (also used by the structure-aware strategy for files it
+    cannot segment). The other members are produced only by the ``"ast"`` strategy (Milestone 9).
+    """
 
     LINE_WINDOW = "line_window"  # window of whole lines (or a fragment of one over-long line)
+    MODULE = "module"  # module-level statements: imports, docstring, constants, scripts
+    FUNCTION = "function"  # a module-level function (or a part of one that was too large)
+    METHOD = "method"  # a function defined directly in a class body
+    CLASS = "class"  # a whole class, or the non-method parts of a class that was split
+
+
+# How a chunk's boundaries were decided (``None`` for the baseline strategy, which has no notion
+# of structure):
+#   "ast"       boundaries are AST definition / statement boundaries;
+#   "ast_split" inside an AST-segmented file, one statement was larger than the token budget and
+#               was cut by the baseline line/fragment splitter;
+#   "fallback"  the whole file was chunked by the baseline line splitter (not Python, or the
+#               parser could not be used).
+Segmentation = Literal["ast", "ast_split", "fallback"]
 
 
 def sha256_text(text: str) -> str:
@@ -113,10 +132,17 @@ class Chunk(BaseModel):
     fragment_index: int | None = Field(default=None, ge=0)
     fragment_count: int | None = Field(default=None, ge=1)
 
-    # Symbol metadata. Always None for the baseline strategy; reserved for Milestone 9.
+    # Symbol metadata. Always None for the baseline strategy; filled by the "ast" strategy only
+    # where the AST gives a reliable answer (see docs/chunking.md, "Symbol metadata").
+    #   symbol_name:    the definition this chunk belongs to, e.g. "load"
+    #   qualified_name: dotted path through enclosing classes, e.g. "RepositoryLoader.load"
+    #   parent_class:   qualified name of the directly enclosing class, e.g. "Outer.Inner"
     symbol_name: str | None = None
     qualified_name: str | None = None
     parent_class: str | None = None
+
+    # Not part of the chunk id (the strategy name/version/params already are). None = baseline.
+    segmentation: Segmentation | None = None
 
     @field_validator("file_path")
     @classmethod

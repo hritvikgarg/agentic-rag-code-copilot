@@ -69,6 +69,8 @@ class BuildReport:
     seconds_index_and_save: float
     seconds_total: float
     artifact_sizes: dict[str, int]  # file name -> bytes (including manifest.json)
+    chunking_strategy: str = "line"
+    chunking_strategy_version: int = 1
 
 
 def utc_timestamp() -> str:
@@ -121,15 +123,18 @@ def expectation_for_repository(
     repository_name: str | None = None,
     ignore_directories: Sequence[str] = (),
     text_style: TextStyle | None = None,
+    chunking_strategy: str | None = None,
 ) -> IndexExpectation:
     """What an index of ``root`` should look like under the current configuration.
 
     Ingests the repository (to fingerprint it) but embeds nothing and loads no model, so the
     embedding *dimension* is left unchecked (``None``); the model id comes from the settings.
+    ``chunking_strategy`` overrides ``settings.chunking_strategy`` (e.g. to validate an ``"ast"``
+    index without changing the environment).
     """
     settings = settings or get_settings()
     ingestion = _ingest(root, settings, repository_name, ignore_directories)
-    chunker = create_chunker(settings=settings)
+    chunker = create_chunker(chunking_strategy, settings=settings)
     return IndexExpectation(
         repository_name=ingestion.repository_name,
         repository_fingerprint=repository_fingerprint(ingestion.files),
@@ -156,6 +161,7 @@ def build_repository_index(
     text_style: TextStyle | None = None,
     overwrite: bool = False,
     allow_truncated: bool = False,
+    chunking_strategy: str | None = None,
 ) -> BuildReport:
     """Ingest, chunk, embed and index ``root``, then atomically save the index.
 
@@ -165,6 +171,8 @@ def build_repository_index(
         IndexBuildError: ingestion hit a repository limit (partial index) and ``allow_truncated``
             is false, or the embeddings/chunks are inconsistent.
         IndexExistsError: the same index already exists and ``overwrite`` is false.
+
+    ``chunking_strategy`` (``"line"`` or ``"ast"``) overrides ``settings.chunking_strategy``.
     """
     settings = settings or get_settings()
     style: TextStyle = text_style or settings.embedding_text_style
@@ -180,7 +188,7 @@ def build_repository_index(
     if not ingestion.files:
         raise EmptyIndexError("the repository has no accepted files to index")
 
-    chunker = create_chunker(settings=settings)
+    chunker = create_chunker(chunking_strategy, settings=settings)
     chunking = chunk_repository(ingestion, chunker)
     chunks = sort_chunks_canonically(chunking.chunks)
     after_chunk = time.perf_counter()
@@ -247,4 +255,6 @@ def build_repository_index(
         seconds_index_and_save=finished - after_embed,
         seconds_total=finished - started,
         artifact_sizes=sizes,
+        chunking_strategy=chunker.name,
+        chunking_strategy_version=chunker.version,
     )

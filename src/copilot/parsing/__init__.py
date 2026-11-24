@@ -1,1 +1,1 @@
-"""Source and documentation parsing, e.g. Python AST symbol tables (Milestones 3 and 9)."""
+"""Placeholder package (unused). The Python AST logic lives in ``copilot.chunking.ast_chunker``."""

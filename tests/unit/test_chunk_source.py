@@ -7,6 +7,7 @@ from copilot.chunking import (
     StrategyNotImplementedError,
     UnknownChunkingStrategyError,
     create_chunker_from_params,
+    registry,
 )
 from copilot.models.chunk import sha256_text
 from copilot.retrieval import ChunkContentMismatchError, ChunkNotFoundError, ChunkSource
@@ -103,8 +104,15 @@ def test_missing_or_invalid_recorded_parameters_are_refused(params):
         create_chunker_from_params("line", 1, params)
 
 
-def test_unknown_and_reserved_strategies_are_refused():
+def test_unknown_and_reserved_strategies_are_refused(monkeypatch):
     with pytest.raises(UnknownChunkingStrategyError):
         create_chunker_from_params("nope", 1, PARAMS)
+    monkeypatch.setitem(registry._RESERVED, "future", "a later milestone")
     with pytest.raises(StrategyNotImplementedError):
+        create_chunker_from_params("future", 1, PARAMS)
+
+
+def test_ast_strategy_refuses_line_parameters():
+    # the "ast" strategy is implemented, but a baseline parameter set cannot describe it
+    with pytest.raises(ChunkingError):
         create_chunker_from_params("ast", 1, PARAMS)

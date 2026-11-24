@@ -1,15 +1,16 @@
 """Chunking strategy registry: strategy name (from ``Settings``) -> ``Chunker`` instance.
 
-Only implemented strategies are registered. ``"ast"`` is a *reserved* name (it is a valid value
-of ``Settings.chunking_strategy``) whose implementation arrives in Milestone 9; asking for it now
-fails loudly instead of silently falling back to the baseline, which would corrupt the planned
-two-strategy experiment.
+Two strategies are implemented: ``"line"`` (baseline, the default) and ``"ast"`` (structure-aware
+Python chunking, Milestone 9). Selecting one never silently falls back to the other: an unknown or
+unimplemented name fails loudly, which keeps the two-strategy experiment honest. ``_RESERVED`` is
+the (now empty) mechanism for announcing a configuration value before its implementation exists.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
+from copilot.chunking.ast_chunker import AstChunker
 from copilot.chunking.base import Chunker
 from copilot.chunking.errors import (
     ChunkingError,
@@ -25,10 +26,17 @@ _FACTORIES: dict[str, Callable[[Settings], Chunker]] = {
         overlap_lines=s.chunk_overlap_lines,
         max_tokens=s.chunk_max_tokens,
     ),
+    # The fallback line splitter of the "ast" strategy uses the same size/overlap/token settings as
+    # the baseline, so non-Python files are cut identically by both strategies.
+    "ast": lambda s: AstChunker(
+        max_tokens=s.chunk_max_tokens,
+        fallback_size_lines=s.chunk_size_lines,
+        fallback_overlap_lines=s.chunk_overlap_lines,
+    ),
 }
 
 # Valid configuration values whose implementation is a later milestone -> where it arrives.
-_RESERVED: dict[str, str] = {"ast": "Milestone 9 (structure-aware chunking)"}
+_RESERVED: dict[str, str] = {}
 
 
 def available_strategies() -> list[str]:
@@ -72,6 +80,22 @@ def create_chunker_from_params(name: str, version: int, params: Mapping[str, int
             raise ChunkingError(
                 f"invalid chunking parameters for {name!r}: {dict(params)}"
             ) from exc
+    elif name == "ast":
+        try:
+            chunker = AstChunker(
+                max_tokens=int(params["max_tokens"]),
+                fallback_size_lines=int(params["fallback_size_lines"]),
+                fallback_overlap_lines=int(params["fallback_overlap_lines"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ChunkingError(
+                f"invalid chunking parameters for {name!r}: {dict(params)}"
+            ) from exc
+        if dict(params) != chunker.params():  # e.g. the line splitter version changed
+            raise ChunkingError(
+                f"the index was built with {name!r} parameters {dict(params)}, this code uses "
+                f"{chunker.params()}: chunk ids would differ; rebuild the index"
+            )
     elif name in _RESERVED:
         raise StrategyNotImplementedError(
             f"chunking strategy {name!r} is reserved for {_RESERVED[name]} and is not "

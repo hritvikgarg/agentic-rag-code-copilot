@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 
 from copilot.chunking.base import chunk_repository
 from copilot.chunking.errors import ChunkingError
@@ -78,6 +79,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"by chunk type:       {stats.by_chunk_type}")
     print(f"by language:         {stats.by_language}")
+    segmentation = Counter(c.segmentation for c in result.chunks if c.segmentation)
+    if segmentation:  # only structure-aware strategies set it
+        print(f"by segmentation:     {dict(sorted(segmentation.items()))}")
     print(f"elapsed:             {stats.elapsed_seconds:.3f}s")
     for chunk in result.chunks[: max(args.samples, 0)]:
         part = (
@@ -85,9 +89,10 @@ def main(argv: list[str] | None = None) -> int:
             if chunk.is_fragment
             else ""
         )
+        symbol = f"  {chunk.qualified_name}" if chunk.qualified_name else ""
         print(
             f"  {chunk.chunk_id}  {chunk.file_path}:{chunk.start_line}-{chunk.end_line}  "
-            f"{chunk.chunk_type.value}  tokens={chunk.token_estimate}{part}"
+            f"{chunk.chunk_type.value}  tokens={chunk.token_estimate}{part}{symbol}"
         )
     return 0
 

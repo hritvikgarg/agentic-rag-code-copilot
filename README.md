@@ -4,14 +4,17 @@ An academic project: a repository-aware AI assistant that answers questions abou
 using evidence retrieved from that codebase, and cites the files, functions and line ranges
 it used.
 
-> **Status: Milestone 8 (agentic LangGraph workflow), plus stabilization.** Implemented: safe
-> ingestion, baseline chunking, local embeddings, a FAISS index, semantic retrieval, a content-secret
+> **Status: Milestone 9 (structure-aware Python chunking), after Milestone 8 (agentic LangGraph
+> workflow) and its corrections.** Implemented: safe
+> ingestion, baseline and structure-aware chunking, local embeddings, a FAISS index, semantic retrieval, a content-secret
 > scanner with a fail-closed gate, a plain-LLM baseline and grounded RAG with citations, a
 > Streamlit UI over a service layer, a plain-vs-RAG comparison framework (resumable, with a
 > quota circuit breaker), and a bounded agentic RAG workflow. **No result in this repository
 > shows that RAG, or the agentic workflow, answers better than a plain LLM or than baseline RAG:
-> the comparison is not yet complete or rated, and the agent has only been tested offline.**
-> Structure-aware chunking, the chunking experiment and debugging assistance are **planned.** See
+> the comparison is not yet complete or rated, and the agent has only been tested offline. Nor is
+> there any result showing that structure-aware chunking retrieves better than the baseline: that
+> experiment (Milestone 10) has not been run.**
+> The chunking experiment and debugging assistance are **planned.** See
 > [Current implementation status](#current-implementation-status).
 
 ## Academic context
@@ -73,7 +76,7 @@ The full design, technology decisions, milestones and evaluation plan are in
 | LLM | Gemini via `google-genai` (an Ollama fallback is not implemented) | **Implemented (Milestone 6)** |
 | Interface | Streamlit over `CopilotService` | **Implemented (Milestone 7)** |
 | Orchestration | LangGraph 1.x | **Implemented (Milestone 8; offline-tested, quality not measured)** |
-| Parsing | Python `ast` for structure-aware chunking | Planned (Milestone 9) |
+| Parsing | Python `ast` for structure-aware chunking | **Implemented (Milestone 9; offline-tested, retrieval effect not measured)** |
 
 ## Repository structure
 
@@ -85,7 +88,7 @@ agentic-rag-code-copilot/
 ├── src/copilot/
 │   ├── config/             # IMPLEMENTED: settings.py, logging_setup.py
 │   ├── ingestion/          # IMPLEMENTED: policy, discovery, reader, loader, CLI
-│   ├── chunking/           # IMPLEMENTED (baseline only): line windows, registry, stats, CLI
+│   ├── chunking/           # IMPLEMENTED: baseline line windows + structure-aware `ast` (Milestone 9), registry, stats, CLI
 │   ├── models/             # IMPLEMENTED: ingestion and chunk models
 │   ├── embeddings/         # IMPLEMENTED: Embedder interface, fastembed adapter, token validation
 │   ├── utils/              # IMPLEMENTED: safe path helpers, token estimate
@@ -97,7 +100,7 @@ agentic-rag-code-copilot/
 │   ├── rag/                # IMPLEMENTED: plain baseline, context, citations, RagService, CLI
 │   ├── agents/             # IMPLEMENTED: LangGraph agentic RAG workflow (Milestone 8)
 │   ├── services/           # IMPLEMENTED: CopilotService and presentation helpers for the UI
-│   ├── parsing/            # PLANNED: docstring-only package (structure-aware chunking, Milestone 9)
+│   ├── parsing/            # placeholder (unused): the AST logic lives in chunking/ast_chunker.py
 ├── ui/                     # IMPLEMENTED: Streamlit app (streamlit_app.py)
 ├── benchmarks/             # the repository-question benchmark used by the evaluation commands
 ├── tests/                  # unit/ integration/ security/ + fixtures/ (synthetic repository builder)
@@ -124,9 +127,14 @@ Directories still to be added when first needed: `scripts/`, `results/` (Milesto
 - **Baseline chunking** (`copilot.chunking`, strategy `line`): a structure-blind baseline that cuts
   *all* supported text (code, Markdown, JSON, YAML) into overlapping line windows, with an
   estimated-token safety cap, a documented deterministic chunk-id contract, citation metadata (file,
-  language, 1-based line range) and chunk/line statistics. Only the baseline
-  strategy exists; the structure-aware `ast` strategy is reserved for Milestone 9 and fails loudly
-  if selected. Details and limitations: [`docs/chunking.md`](docs/chunking.md).
+  language, 1-based line range) and chunk/line statistics. The baseline is the default.
+- **Structure-aware chunking** (strategy `ast`, Milestone 9): parses Python with the standard-library
+  `ast` module (never executing it), keeps each definition that fits the token budget whole, splits
+  oversized classes at members and oversized functions at statements, fills `symbol_name` /
+  `qualified_name` / `parent_class`, and falls back to the baseline's line windows for other
+  languages, Markdown, config files and unparseable Python. `python -m copilot.chunking.compare`
+  prints descriptive chunk-shape statistics for both strategies; **it does not measure retrieval
+  quality** (Milestone 10). Details, policies and limitations: [`docs/chunking.md`](docs/chunking.md).
 - **Local embedding service** (`copilot.embeddings`): an `Embedder` interface (`embed_documents`,
   `embed_query`, `count_tokens`), a fastembed/ONNX adapter for `jinaai/jina-embeddings-v2-base-code`
   (768-d, unit-length vectors), a deterministic fake for tests, batching, a documented model cache,
@@ -251,6 +259,8 @@ Chunk a repository with the configured strategy and print chunk statistics (meta
 
 ```bash
 uv run python -m copilot.chunking path/to/repo --samples 5
+uv run python -m copilot.chunking path/to/repo --strategy ast --samples 5    # structure-aware
+uv run python -m copilot.chunking.compare path/to/repo                       # descriptive statistics only
 ```
 
 Build and inspect a vector index (loads the embedding model; the first run downloads ~0.64 GB;
@@ -304,7 +314,8 @@ The 19-milestone plan is a framework, not a promise that every optional feature 
 | 7 | Streamlit MVP (`CopilotService` + UI) | **Done** |
 | 7.1 | Evaluation resilience (resume, circuit breaker, snapshot isolation) | **Done** |
 | 8 | LangGraph agentic workflow | **Done (offline-tested with fakes; quality not measured)** |
-| 9-11 | Structure-aware chunking, chunking experiment, remaining deliverables | Planned |
+| 9 | Structure-aware (AST) chunking | **Done (offline-tested; no retrieval claim)** |
+| 10-11 | Chunking experiment, remaining deliverables | Planned |
 | 12-18 | Debugging, security hardening, testing, docs, deployment, viva prep | Planned (optional tail) |
 
 ## Security note

@@ -1,5 +1,6 @@
 """Chunking strategies: baseline line windows (Milestone 3); structure-aware AST chunks (M9)."""
 
+from copilot.chunking.ast_chunker import AstChunker
 from copilot.chunking.base import Chunker, chunk_repository
 from copilot.chunking.errors import (
     ChunkingError,
@@ -14,6 +15,7 @@ from copilot.chunking.registry import (
 )
 
 __all__ = [
+    "AstChunker",
     "ChunkingError",
     "Chunker",
     "LineChunker",

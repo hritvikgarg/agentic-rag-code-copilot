@@ -21,7 +21,7 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from copilot.models.chunk import Chunk, ChunkType
+from copilot.models.chunk import Chunk, ChunkType, Segmentation
 from copilot.utils.paths import validate_relative_posix
 from copilot.vectorstore.errors import IndexCorruptError
 
@@ -47,6 +47,9 @@ class ChunkRecord(BaseModel):
     symbol_name: str | None = None
     qualified_name: str | None = None
     parent_class: str | None = None
+    # Added in Milestone 9. Optional with a default so older sidecars still parse, and omitted from
+    # the serialised form when None so baseline sidecars stay byte-identical (see encode_records).
+    segmentation: Segmentation | None = None
 
     @field_validator("file_path")
     @classmethod
@@ -73,15 +76,28 @@ def record_from_chunk(chunk: Chunk, position: int) -> ChunkRecord:
         symbol_name=chunk.symbol_name,
         qualified_name=chunk.qualified_name,
         parent_class=chunk.parent_class,
+        segmentation=chunk.segmentation,
     )
+
+
+# Fields added after the first sidecar format. They are dropped from the serialised form when None
+# so an index built by a strategy that never sets them is byte-identical to one built before they
+# existed (older indexes stay valid and rebuilding them reproduces the same checksums).
+_OMIT_WHEN_NONE = ("segmentation",)
+
+
+def _record_json(record: ChunkRecord) -> dict[str, object]:
+    data = record.model_dump(mode="json")
+    for name in _OMIT_WHEN_NONE:
+        if data.get(name) is None:
+            data.pop(name, None)
+    return data
 
 
 def encode_records(records: Sequence[ChunkRecord]) -> bytes:
     """Canonical JSONL bytes: one compact, key-sorted JSON object per line."""
     lines = (
-        json.dumps(
-            r.model_dump(mode="json"), ensure_ascii=True, sort_keys=True, separators=(",", ":")
-        )
+        json.dumps(_record_json(r), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         for r in records
     )
     return "".join(line + "\n" for line in lines).encode("utf-8")

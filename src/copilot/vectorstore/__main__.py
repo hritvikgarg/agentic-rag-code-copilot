@@ -18,6 +18,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from copilot.chunking import available_strategies
+from copilot.chunking.errors import ChunkingError
 from copilot.config import Settings, get_settings, setup_logging
 from copilot.embeddings.errors import EmbeddingError
 from copilot.embeddings.factory import create_embedder
@@ -49,9 +51,11 @@ def _cmd_build(args: argparse.Namespace, settings: Settings) -> int:
         text_style=args.text_style,
         overwrite=args.force,
         allow_truncated=args.allow_truncated,
+        chunking_strategy=args.chunking_strategy,
     )
     print(f"repository:          {report.repository_name}")
     print(f"files indexed:       {report.files}")
+    print(f"chunking:            {report.chunking_strategy} v{report.chunking_strategy_version}")
     print(f"chunks:              {report.chunks}")
     print(f"vectors:             {report.vectors}")
     print(f"dimension:           {report.dimension}")
@@ -115,6 +119,7 @@ def _cmd_validate(args: argparse.Namespace, settings: Settings) -> int:
             settings=settings,
             repository_name=args.name,
             ignore_directories=args.ignore_dir,
+            chunking_strategy=args.chunking_strategy,
         )
     try:
         index = VectorIndex.load(args.index_dir, expected=expected)
@@ -152,6 +157,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     def add_repo_options(p: argparse.ArgumentParser) -> None:
         p.add_argument("--name", help="repository name (default: the directory name)")
         p.add_argument("--ignore-dir", action="append", default=[], help="extra directory to prune")
+        p.add_argument(
+            "--chunking-strategy",
+            choices=available_strategies(),
+            help="chunking strategy (default: COPILOT_CHUNKING_STRATEGY / the baseline 'line')",
+        )
 
     build = sub.add_parser("build", help="build and save an index (loads the embedding model)")
     build.add_argument("path", help="repository directory")
@@ -180,7 +190,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = {"build": _cmd_build, "info": _cmd_info, "validate": _cmd_validate}
     try:
         return commands[args.command](args, settings)
-    except (VectorStoreError, EmbeddingError, IngestionError) as exc:
+    except (VectorStoreError, EmbeddingError, IngestionError, ChunkingError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
