@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     agent_min_term_coverage: float = Field(default=0.5, ge=0.0, le=1.0)
     # Architecture questions need evidence from at least this many distinct files.
     agent_architecture_min_files: int = Field(default=2, ge=1, le=10)
+    # Candidate pool (chunks requested from the retriever per round) for architecture questions.
+    # A broad pool lets the per-file cap and the distinct-file preference pick evidence from many
+    # files. An engineering default (the retriever's maximum), NOT an empirically optimal value.
+    agent_architecture_candidates: int = Field(default=50, ge=1, le=50)
 
     # --- Repository ingestion limits ---
     max_file_size_bytes: int = Field(default=500_000, ge=1_000)

@@ -39,6 +39,9 @@ class AgentConfig(BaseModel):
     min_term_coverage: float = Field(default=0.5, ge=0.0, le=1.0)
     architecture_min_files: int = Field(default=2, ge=1, le=10)
     top_k: int = Field(default=5, ge=1, le=50)  # chunks requested per retrieval round (base)
+    # Candidate pool for architecture questions (engineering default, not an optimum): how many
+    # ranked chunks each round requests so that selection can choose among many files.
+    architecture_candidates: int = Field(default=50, ge=1, le=50)
 
     @classmethod
     def from_settings(cls, settings: Settings, *, max_rounds: int | None = None) -> AgentConfig:
@@ -48,6 +51,7 @@ class AgentConfig(BaseModel):
             min_term_coverage=settings.agent_min_term_coverage,
             architecture_min_files=settings.agent_architecture_min_files,
             top_k=settings.retrieval_top_k,
+            architecture_candidates=settings.agent_architecture_candidates,
         )
 
 
@@ -66,10 +70,10 @@ class RetrievalPlan(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     intent: Intent
-    top_k: int  # chunks requested per round
-    per_file_cap: int | None  # max accumulated chunks from one file (None: unlimited)
+    top_k: int  # the CANDIDATE budget: chunks requested from the retriever per round
+    per_file_cap: int | None  # selection rule: max accumulated chunks from one file
     prefers_symbol_matches: bool  # order symbol/path matches first when building the context
-    diversify_files: bool  # spread the context across files before filling from the best file
+    diversify_files: bool  # selection and ordering prefer distinct files (relevance order kept)
     hint: str | None  # fixed intent word appended to refined queries (never a path or symbol)
 
 
@@ -119,11 +123,20 @@ class TraceEvent(BaseModel):
     query_chars: int | None = None
     query_terms: int | None = None
     query_sha256_12: str | None = None
-    # --- retrieval ---
-    top_k: int | None = None
-    retrieved: int | None = None
+    # --- retrieval (candidate budget) ---
+    top_k: int | None = None  # candidates requested
+    retrieved: int | None = None  # candidates returned
+    candidate_files: int | None = None  # distinct files among the candidates returned
+    # --- selection (evidence budget) ---
     new_accepted: int | None = None
+    rejected_duplicate: int | None = None
+    rejected_per_file_cap: int | None = None
+    rejected_capacity: int | None = None  # not selected because the evidence budget was full
     evidence_total: int | None = None
+    evidence_files: int | None = None  # distinct files in the accumulated evidence
+    # --- final context (context budget; set on the generate event) ---
+    context_chunks: int | None = None
+    context_dropped_budget: int | None = None
     # --- assessment / routing ---
     assessment: str | None = None
     term_coverage: float | None = None
@@ -134,6 +147,30 @@ class TraceEvent(BaseModel):
     # --- generation ---
     generation_status: str | None = None
     note: str | None = None
+
+
+class SourceProvenance(BaseModel):
+    """Where one cited source came from. Agent-specific; ``Citation`` itself is unchanged.
+
+    ``retrieval_round`` and ``retrieval_rank`` describe the **first** retrieval occurrence of the
+    chunk (later occurrences are rejected as duplicates and contribute nothing); ``score`` is the
+    cosine similarity of that round's query, comparable only with other results of the same round.
+    ``selection_order`` is the chunk's position in the evidence order chosen by the agent, and
+    ``source_number`` is the label the model saw (``Source n``).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source_number: int = Field(ge=1)
+    chunk_id: str
+    file_path: str
+    start_line: int
+    end_line: int
+    retrieval_round: int = Field(ge=1)
+    retrieval_rank: int = Field(ge=1)
+    query_kind: str
+    score: float
+    selection_order: int = Field(ge=1)
 
 
 class FailureInfo(BaseModel):
@@ -165,7 +202,9 @@ class AgentState(TypedDict, total=False):
     round: int  # rounds started (the attempt count)
     max_rounds: int
     results: tuple[RetrievalResult, ...]  # the latest round only
-    evidence: tuple[RetrievalResult, ...]  # accumulated across rounds
+    evidence: tuple[RetrievalResult, ...]  # accumulated across rounds, in selection order
+    evidence_origin: dict[str, tuple[int, str]]  # chunk_id -> (first round, query kind)
+    selection_order: tuple[str, ...]  # chunk ids in the order given to the prompt builder
     new_accepted: int
     retrieval_seconds: float
     # assessment and outcome

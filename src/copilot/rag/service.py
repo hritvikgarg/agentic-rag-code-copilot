@@ -104,6 +104,7 @@ class RagService:
         results: Sequence[RetrievalResult],
         *,
         retrieval_seconds: float = 0.0,
+        preserve_order: bool = False,
     ) -> RagAnswer:
         """Everything after retrieval, for evidence that was retrieved elsewhere.
 
@@ -112,14 +113,26 @@ class RagService:
         model when nothing fits, scan the exact outbound text (twice), call the guarded client and
         derive the citations from the evidence that actually entered the prompt. The prompts,
         prompt versions and limits are the baseline's; nothing here is agent-specific.
+
+        ``preserve_order=True`` keeps the caller's evidence order instead of sorting by retrieval
+        rank (see ``build_context``); the default is the baseline behaviour.
         """
-        return self._answer_from(validate_query(question), results, retrieval_seconds)
+        return self._answer_from(
+            validate_query(question), results, retrieval_seconds, preserve_order=preserve_order
+        )
 
     def _answer_from(
-        self, text: str, results: Sequence[RetrievalResult], retrieval_seconds: float
+        self,
+        text: str,
+        results: Sequence[RetrievalResult],
+        retrieval_seconds: float,
+        *,
+        preserve_order: bool = False,
     ) -> RagAnswer:
         settings = self._settings
-        context = build_context(results, settings.rag_context_max_tokens)
+        context = build_context(
+            results, settings.rag_context_max_tokens, preserve_order=preserve_order
+        )
         common = {
             "question": text,
             "retrieved_count": len(results),

@@ -1,16 +1,31 @@
-"""Accumulating retrieved evidence across rounds, and arranging it for the prompt.
+"""Selecting retrieved evidence across rounds, and arranging it for the prompt.
 
 Three pure functions, no I/O:
 
-``merge_evidence``   add one round's results to what is already known, without losing anything
-``arrange_evidence`` order (and re-rank) the accumulated evidence for the final prompt
+``merge_evidence``   select which of one round's candidates join the accumulated evidence
+``arrange_evidence`` order the accumulated evidence for the final prompt (ranks are NOT rewritten)
 ``evidence_text``    the lowercase text the assessor looks in (chunk text, path, symbol names)
 
+Budgets. Three limits are applied at three different points and reported separately:
+the **candidate** budget (how many chunks the retriever is asked for; see ``planning.py``), the
+**evidence** budget (``max_chunks`` and the per-file cap, enforced here) and the **context**
+budget (the token limit applied by ``build_context``). Keeping them apart is what makes starvation
+(few candidates, or all from one file) distinguishable from truncation (evidence that did not fit
+the prompt).
+
 Identity. A chunk is "the same" when its ``chunk_id`` matches (stable, content-derived) or when it
-covers the same ``(file, start_line, end_line)``. Merging never changes a result's metadata; only
-``arrange_evidence`` rewrites ``rank`` (so ``build_context`` keeps the order chosen here). The
-``score`` stays the cosine similarity of the query that found the chunk, which is not comparable
-across different queries, so scores are never used to order evidence from different rounds.
+covers the same ``(file, start_line, end_line)``. Existing evidence is never dropped or reordered
+and no result is modified: ``rank``, ``score`` and ``position`` always keep the values of the
+retrieval that first supplied the chunk. Those values are only meaningful *within one round* (one
+query); scores and ranks from different refined queries are never compared with each other.
+
+Selection (``prefer_distinct_files``, used for architecture questions). Candidates are first put in
+a deterministic order, ``(rank, position, chunk_id)``. Pass 1 takes, in that order, the best
+candidate of every file that is not yet represented in the evidence; pass 2 fills the remaining
+capacity with the best remaining candidates, still honouring the per-file cap. So relevance order
+decides *which* chunk of a file and *which* file comes first, and diversity decides only that a
+new file beats a second chunk of an already represented one. Without the flag candidates are taken
+in ``(rank, position, chunk_id)`` order (the Milestone 8 behaviour).
 """
 
 from __future__ import annotations
@@ -18,9 +33,30 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Sequence
 
+from pydantic import BaseModel, ConfigDict
+
 from copilot.agents.state import RetrievalPlan
 from copilot.agents.terms import term_in
 from copilot.retrieval import RetrievalResult
+
+
+class MergeResult(BaseModel):
+    """The outcome of merging one round's candidates into the evidence, with safe counts."""
+
+    model_config = ConfigDict(frozen=True)
+
+    evidence: tuple[RetrievalResult, ...]  # accumulated evidence, selection order
+    accepted: tuple[RetrievalResult, ...]  # the candidates added by this call
+    candidates: int  # candidates offered
+    candidate_files: int  # distinct files among them
+    rejected_duplicate: int  # already in the evidence, or repeated within the batch
+    rejected_per_file_cap: int  # their file had reached the per-file cap
+    rejected_capacity: int  # not selected because the evidence budget was full
+    evidence_files: int  # distinct files in the accumulated evidence
+
+    @property
+    def accepted_count(self) -> int:
+        return len(self.accepted)
 
 
 def _span(result: RetrievalResult) -> tuple[str, int, int]:
@@ -33,30 +69,66 @@ def merge_evidence(
     *,
     max_chunks: int,
     per_file_cap: int | None,
-) -> tuple[tuple[RetrievalResult, ...], int]:
-    """``(accumulated evidence, number of newly accepted chunks)``.
-
-    Existing evidence is never dropped or reordered. A new chunk is accepted when it is not a
-    duplicate, the total stays within ``max_chunks`` and its file is below ``per_file_cap``.
-    """
+    prefer_distinct_files: bool = False,
+) -> MergeResult:
+    """Add the non-duplicate ``new`` candidates to ``existing`` within the evidence budget."""
+    candidates = sorted(new, key=lambda r: (r.rank, r.position, r.chunk_id))
     merged = list(existing)
-    seen_ids = {r.chunk_id for r in merged}
-    seen_spans = {_span(r) for r in merged}
+    known_ids = {r.chunk_id for r in merged}
+    known_spans = {_span(r) for r in merged}
     per_file = Counter(r.file_path for r in merged)
-    accepted = 0
-    for result in new:
+
+    unique: list[RetrievalResult] = []
+    duplicates = 0
+    for result in candidates:
+        if result.chunk_id in known_ids or _span(result) in known_spans:
+            duplicates += 1
+            continue
+        unique.append(result)
+        known_ids.add(result.chunk_id)
+        known_spans.add(_span(result))
+
+    taken: set[str] = set()
+    accepted: list[RetrievalResult] = []
+
+    def take(result: RetrievalResult) -> bool:
         if len(merged) >= max_chunks:
-            break
-        if result.chunk_id in seen_ids or _span(result) in seen_spans:
+            return False
+        if per_file_cap is not None and per_file[result.file_path] >= per_file_cap:
+            return False
+        merged.append(result)
+        accepted.append(result)
+        taken.add(result.chunk_id)
+        per_file[result.file_path] += 1
+        return True
+
+    if prefer_distinct_files:
+        represented = {path for path, count in per_file.items() if count}
+        for result in unique:  # pass 1: the best chunk of each file not represented yet
+            if result.file_path not in represented and take(result):
+                represented.add(result.file_path)
+    for result in unique:  # pass 2 (or the only pass): fill the remaining capacity in order
+        if result.chunk_id not in taken:
+            take(result)
+
+    capped = full = 0
+    for result in unique:
+        if result.chunk_id in taken:
             continue
         if per_file_cap is not None and per_file[result.file_path] >= per_file_cap:
-            continue
-        merged.append(result)
-        seen_ids.add(result.chunk_id)
-        seen_spans.add(_span(result))
-        per_file[result.file_path] += 1
-        accepted += 1
-    return tuple(merged), accepted
+            capped += 1
+        else:
+            full += 1
+    return MergeResult(
+        evidence=tuple(merged),
+        accepted=tuple(accepted),
+        candidates=len(candidates),
+        candidate_files=len({r.file_path for r in candidates}),
+        rejected_duplicate=duplicates,
+        rejected_per_file_cap=capped,
+        rejected_capacity=full,
+        evidence_files=len({r.file_path for r in merged}),
+    )
 
 
 def _mentions_symbol(result: RetrievalResult, symbols_lower: Sequence[str]) -> bool:
@@ -75,7 +147,11 @@ def arrange_evidence(
     symbols: Sequence[str],
     terms: Sequence[str],
 ) -> tuple[RetrievalResult, ...]:
-    """The evidence in prompt order with ``rank`` rewritten to 1..n. Stable and deterministic.
+    """The evidence in prompt order. Stable and deterministic; no result is modified.
+
+    ``rank``, ``score`` and ``position`` stay the values of the retrieval that supplied each chunk
+    (see the module docstring), so a citation's retrieval rank is never confused with its place in
+    the prompt. The order is conveyed to ``build_context`` with ``preserve_order=True``.
 
     * ``symbol_lookup`` (``prefers_symbol_matches``): chunks whose symbol name, qualified name or
       file path contains a symbol or key term from the question come first, because a lookup
@@ -96,7 +172,7 @@ def arrange_evidence(
             (rest if result.file_path in seen_files else first).append(result)
             seen_files.add(result.file_path)
         ordered = first + rest
-    return tuple(r.model_copy(update={"rank": i}) for i, r in enumerate(ordered, start=1))
+    return tuple(ordered)
 
 
 def evidence_text(evidence: Sequence[RetrievalResult]) -> str:

@@ -64,6 +64,8 @@ def test_fake_llm_mode_runs_the_whole_workflow_offline(capsys, no_hosted_model, 
     assert "offline fake model" in out and "no real model was called" in out
     assert "[Source 1] src/pkg/chunk_ids.py:" in out  # POSIX relative path with a line range
     assert "intent:" in out and "retrieval rounds:" in out and "termination:" in out
+    assert "context: " in out and "estimated tokens" in out
+    assert "round 1 rank " in out  # provenance: retrieval round and rank of each source
     assert "no model is called" in err
     assert str(repo) not in out + err and "\\" not in out
     assert "def make_chunk_id" not in out  # citations and metadata only, never source text

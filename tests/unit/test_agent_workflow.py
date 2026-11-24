@@ -152,7 +152,7 @@ def test_the_intent_changes_the_retrieval_request_and_the_refinement():
     ra = wf_a.run("Explain the architecture of the indexer")
     rg = wf_g.run("tell me something about authentication")
     assert ra.decision.intent is Intent.ARCHITECTURE and rg.decision.intent is Intent.GENERAL
-    assert arch.calls[0][1] == 10 and general.calls[0][1] == 5  # top-k differs by intent
+    assert arch.calls[0][1] == 50 and general.calls[0][1] == 5  # top-k differs by intent
     # architecture needs >= 2 files, so one file triggers a refinement that "general" does not need
     assert ra.rounds >= 2 and rg.rounds == 1
     assert ra.assessment is not None

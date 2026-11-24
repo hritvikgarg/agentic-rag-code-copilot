@@ -67,8 +67,16 @@ def format_result(result: AgentResult, *, show_trace: bool = False) -> str:
         lines.append(answer.answer or "")
     lines += ["", "SOURCES"]
     if result.citations:
+        by_source = {p.source_number: p for p in result.provenance}
         for c in result.citations:
-            lines.append(f"[{c.label}] {c.location}  (rank {c.rank}, score {c.score:.4f})")
+            p = by_source.get(c.source_number)
+            where = (
+                f"round {p.retrieval_round} rank {p.retrieval_rank}, "
+                f"that round's score {p.score:.4f}"
+                if p is not None
+                else f"rank {c.rank}, score {c.score:.4f}"
+            )
+            lines.append(f"[{c.label}] {c.location}  ({where})")
     else:
         lines.append("(none)")
     for warning in result.warnings:
@@ -87,6 +95,11 @@ def format_result(result: AgentResult, *, show_trace: bool = False) -> str:
         )
     lines.append(f"termination: {result.termination.value}")
     lines.append(f"evidence: {result.evidence_status}")
+    if answer is not None and answer.sources:
+        lines.append(
+            f"context: {len(answer.sources)} chunk(s), ~{answer.context_estimated_tokens} "
+            "estimated tokens"
+        )
     if answer is not None and answer.generation is not None:
         g = answer.generation
         lines.append(f"model: {g.provider}/{g.model}  finish: {g.finish_reason}")

@@ -19,33 +19,33 @@ def test_merge_deduplicates_by_chunk_id_and_by_span_and_keeps_existing_evidence(
     same_id = chunk("alpha", path="a.py", start=1, rank=3)  # identical content -> same chunk_id
     same_span = chunk("different text", path="b.py", start=5, rank=4, chunk_id="f" * 16)
     fresh = chunk("gamma", path="c.py", start=9, rank=5)
-    merged, accepted = merge_evidence(
-        [a, b], [same_id, same_span, fresh], max_chunks=10, per_file_cap=None
-    )
-    assert merged == (a, b, fresh) and accepted == 1
+    result = merge_evidence([a, b], [same_id, same_span, fresh], max_chunks=10, per_file_cap=None)
+    assert result.evidence == (a, b, fresh) and result.accepted_count == 1
+    assert result.rejected_duplicate == 2
 
 
 def test_merge_never_changes_or_drops_what_is_already_known():
     existing = [chunk(f"t{i}", path=f"f{i}.py", start=i + 1, rank=i + 1) for i in range(3)]
-    merged, accepted = merge_evidence(existing, [], max_chunks=3, per_file_cap=None)
-    assert merged == tuple(existing) and accepted == 0
-    merged, accepted = merge_evidence(
-        existing, [chunk("new", path="n.py")], max_chunks=3, per_file_cap=None
-    )
-    assert merged == tuple(existing) and accepted == 0  # full: the new one is refused, not swapped
+    result = merge_evidence(existing, [], max_chunks=3, per_file_cap=None)
+    assert result.evidence == tuple(existing) and result.accepted_count == 0
+    result = merge_evidence(existing, [chunk("new", path="n.py")], max_chunks=3, per_file_cap=None)
+    assert result.evidence == tuple(existing) and result.accepted_count == 0
+    assert result.rejected_capacity == 1  # full: the new one is refused, not swapped in
 
 
 def test_merge_respects_the_total_cap_and_the_per_file_cap():
     new = [chunk(f"x{i}", path="same.py", start=i * 10 + 1, rank=i + 1) for i in range(5)]
-    merged, accepted = merge_evidence([], new, max_chunks=10, per_file_cap=2)
-    assert len(merged) == 2 and accepted == 2
-    merged, accepted = merge_evidence([], new, max_chunks=3, per_file_cap=None)
-    assert len(merged) == 3 and accepted == 3
+    result = merge_evidence([], new, max_chunks=10, per_file_cap=2)
+    assert len(result.evidence) == 2 and result.accepted_count == 2
+    assert result.rejected_per_file_cap == 3 and result.rejected_capacity == 0
+    result = merge_evidence([], new, max_chunks=3, per_file_cap=None)
+    assert len(result.evidence) == 3 and result.accepted_count == 3
+    assert result.rejected_capacity == 2 and result.rejected_per_file_cap == 0
 
 
 def test_merge_preserves_metadata_exactly():
     original = chunk("alpha", path="src/a.py", start=7, rank=4, score=0.31)
-    merged, _ = merge_evidence([], [original], max_chunks=5, per_file_cap=None)
+    merged = merge_evidence([], [original], max_chunks=5, per_file_cap=None).evidence
     assert merged[0] == original and merged[0].score == 0.31 and merged[0].rank == 4
 
 
@@ -55,7 +55,7 @@ def make_plan(question):
     return decision, build_plan(decision, CONFIG)
 
 
-def test_symbol_lookup_puts_the_defining_chunk_first_and_reranks_contiguously():
+def test_symbol_lookup_puts_the_defining_chunk_first_without_rewriting_ranks():
     decision, plan = make_plan("Where is make_chunk_id defined?")
     docs = chunk("usage notes", path="docs/readme.md", start=1, rank=1, score=0.9)
     definer = chunk("def make_chunk_id(): ...", path="src/ids.py", start=3, rank=2, score=0.4)
@@ -64,7 +64,8 @@ def test_symbol_lookup_puts_the_defining_chunk_first_and_reranks_contiguously():
     definer = definer.model_copy(update={"symbol_name": "make_chunk_id"})
     out = arrange_evidence([docs, other, definer], plan, symbols=decision.symbols, terms=())
     assert out[0].file_path == "src/ids.py"
-    assert [r.rank for r in out] == [1, 2, 3]
+    assert out[0].rank == 2 and out[0] == definer  # provenance untouched; only the order changed
+    assert sorted(r.chunk_id for r in out) == sorted(r.chunk_id for r in (docs, other, definer))
     assert out[0].score == 0.4 and out[0].start_line == 3 and out[0].chunk_id == definer.chunk_id
 
 

@@ -7,10 +7,16 @@ intent         top-k  file cap    context order              refinement order
 =============  =====  ==========  =========================  ===============================
 symbol_lookup  base   none        symbol/path matches first  symbol, missing, focused
 code_explain   base   none        discovery order            missing, focused, symbol
-architecture   2x     2 per file  one chunk per file first   missing, focused
+architecture   pool   2 per file  distinct files first       missing, focused
 debugging      base   none        discovery order            missing, symbol, focused
 general        base   none        discovery order            missing, focused
 =============  =====  ==========  =========================  ===============================
+
+Three budgets are kept apart: the **candidate** budget (``top_k``: chunks requested per round;
+for architecture, the pool ``COPILOT_AGENT_ARCHITECTURE_CANDIDATES``, default 50, an engineering
+default and not a tuned optimum), the **evidence** budget (``max_evidence_chunks`` and the per-file
+cap, applied during selection) and the **context** budget (``COPILOT_RAG_CONTEXT_MAX_TOKENS``,
+applied when the prompt is built).
 
 ("missing" = question terms the evidence lacks, "focused" = the question's content words,
 "symbol" = identifiers named in the question.)
@@ -53,7 +59,7 @@ def build_plan(decision: IntentDecision, config: AgentConfig) -> RetrievalPlan:
     architecture = intent is Intent.ARCHITECTURE
     return RetrievalPlan(
         intent=intent,
-        top_k=min(config.top_k * 2, MAX_TOP_K) if architecture else config.top_k,
+        top_k=min(config.architecture_candidates, MAX_TOP_K) if architecture else config.top_k,
         per_file_cap=2 if architecture else None,
         prefers_symbol_matches=intent is Intent.SYMBOL_LOOKUP,
         diversify_files=architecture,

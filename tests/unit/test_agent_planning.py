@@ -29,16 +29,19 @@ def test_the_plan_differs_by_intent():
             Intent.GENERAL: "tell me something about indexing",
         }.items()
     }
-    assert plans[Intent.ARCHITECTURE].top_k == 10 and plans[Intent.ARCHITECTURE].per_file_cap == 2
+    assert plans[Intent.ARCHITECTURE].top_k == 50 and plans[Intent.ARCHITECTURE].per_file_cap == 2
     assert plans[Intent.ARCHITECTURE].diversify_files
     assert plans[Intent.SYMBOL_LOOKUP].prefers_symbol_matches
     assert plans[Intent.CODE_EXPLAIN].top_k == 5 and plans[Intent.CODE_EXPLAIN].per_file_cap is None
     assert len({p.hint for p in plans.values()}) == 5  # every intent has its own hint (None once)
 
 
-def test_architecture_top_k_is_capped_at_the_retriever_maximum():
+def test_the_architecture_candidate_pool_is_configuration_not_derived_from_the_baseline_top_k():
     decision = classify_intent("Explain the architecture of the indexer")
-    assert build_plan(decision, AgentConfig(top_k=40)).top_k == 50
+    assert build_plan(decision, AgentConfig(top_k=40)).top_k == 50  # pool default
+    assert build_plan(decision, AgentConfig(top_k=5, architecture_candidates=20)).top_k == 20
+    other = classify_intent("Explain how chunking works")
+    assert build_plan(other, AgentConfig(top_k=7, architecture_candidates=20)).top_k == 7
 
 
 @pytest.mark.parametrize(

@@ -42,6 +42,7 @@ from copilot.agents.state import (
     AssessmentOutcome,
     FailureInfo,
     QueryKind,
+    SourceProvenance,
     TerminationReason,
     TraceEvent,
 )
@@ -78,6 +79,10 @@ class AgentResult(BaseModel):
     termination: TerminationReason
     answer: RagAnswer | None  # None when abstaining or when generation failed
     citations: tuple[Citation, ...]
+    # One entry per citation (same order and ``source_number``): the retrieval round, rank and
+    # query-specific score that first supplied the chunk, and its place in the agent's evidence
+    # order. ``Citation.rank`` and ``.score`` keep their baseline meaning (the supplying retrieval).
+    provenance: tuple[SourceProvenance, ...] = ()
     abstention_reason: str | None
     failure: FailureInfo | None
     retrieval_seconds: float
@@ -200,6 +205,8 @@ class AgentWorkflow:
             "round": 0,
             "max_rounds": config.max_rounds,
             "evidence": (),
+            "evidence_origin": {},
+            "selection_order": (),
             "results": (),
             "new_accepted": 0,
             "retrieval_seconds": 0.0,
@@ -245,29 +252,50 @@ class AgentWorkflow:
             "results": results,
             "retrieval_seconds": round(state["retrieval_seconds"] + elapsed, 4),
             "trace": [
-                TraceEvent(**base, retrieved=len(results), duration_seconds=round(elapsed, 4))
+                TraceEvent(
+                    **base,
+                    retrieved=len(results),
+                    candidate_files=len({r.file_path for r in results}),
+                    duration_seconds=round(elapsed, 4),
+                )
             ],
         }
 
     def _merge(self, state: AgentState) -> dict:
         started = time.perf_counter()
         config = state["config"]
-        evidence, accepted = merge_evidence(
+        plan = state["plan"]
+        merged = merge_evidence(
             state["evidence"],
             state["results"],
             max_chunks=config.max_evidence_chunks,
-            per_file_cap=state["plan"].per_file_cap,
+            per_file_cap=plan.per_file_cap,
+            prefer_distinct_files=plan.diversify_files,
         )
+        # Provenance: the FIRST retrieval that supplied a chunk (later duplicates are rejected).
+        origin = dict(state.get("evidence_origin", {}))
+        for result in merged.accepted:
+            origin[result.chunk_id] = (state["round"], state["current_kind"].value)
         event = TraceEvent(
             node="merge_evidence",
             round=state["round"],
             intent=state["intent"].value,
-            retrieved=len(state["results"]),
-            new_accepted=accepted,
-            evidence_total=len(evidence),
+            retrieved=merged.candidates,
+            candidate_files=merged.candidate_files,
+            new_accepted=merged.accepted_count,
+            rejected_duplicate=merged.rejected_duplicate,
+            rejected_per_file_cap=merged.rejected_per_file_cap,
+            rejected_capacity=merged.rejected_capacity,
+            evidence_total=len(merged.evidence),
+            evidence_files=merged.evidence_files,
             duration_seconds=round(time.perf_counter() - started, 4),
         )
-        return {"evidence": evidence, "new_accepted": accepted, "trace": [event]}
+        return {
+            "evidence": merged.evidence,
+            "evidence_origin": origin,
+            "new_accepted": merged.accepted_count,
+            "trace": [event],
+        }
 
     def _assess(self, state: AgentState) -> dict:
         started = time.perf_counter()
@@ -341,9 +369,13 @@ class AgentWorkflow:
             terms=state["terms"],
         )
         base = {"node": "generate", "round": state["round"], "intent": state["intent"].value}
+        selection_order = tuple(r.chunk_id for r in arranged)
         try:
             answer = self._rag.answer_from_evidence(
-                state["query"], arranged, retrieval_seconds=state["retrieval_seconds"]
+                state["query"],
+                arranged,
+                retrieval_seconds=state["retrieval_seconds"],
+                preserve_order=True,  # keep the agent's order; ranks stay retrieval provenance
             )
         except RepositorySecretRiskError:
             failure = FailureInfo(
@@ -363,6 +395,8 @@ class AgentWorkflow:
         event = TraceEvent(
             **base,
             evidence_total=len(arranged),
+            context_chunks=len(answer.sources),
+            context_dropped_budget=sum(d.reason == "budget" for d in answer.dropped_evidence),
             generation_status="abstained_before_model" if abstained else "answered",
             note=answer.insufficient_reason,
             duration_seconds=round(time.perf_counter() - started, 4),
@@ -370,6 +404,7 @@ class AgentWorkflow:
         return {
             "answer": answer,
             "citations": answer.sources,
+            "selection_order": selection_order,
             "abstention_reason": answer.insufficient_reason if abstained else None,
             "trace": [event],
         }
@@ -435,6 +470,32 @@ class AgentWorkflow:
         """The compiled graph as a Mermaid flowchart (used by ``docs/agent.md``)."""
         return self._graph.get_graph().draw_mermaid()
 
+    @staticmethod
+    def _provenance(final: AgentState) -> tuple[SourceProvenance, ...]:
+        """One ``SourceProvenance`` per citation, joined by ``chunk_id`` (never by position)."""
+        by_id = {r.chunk_id: r for r in final.get("evidence", ())}
+        order = {cid: i for i, cid in enumerate(final.get("selection_order", ()), start=1)}
+        origin = final.get("evidence_origin", {})
+        entries: list[SourceProvenance] = []
+        for citation in final.get("citations", ()):
+            result = by_id[citation.chunk_id]
+            round_no, kind = origin[citation.chunk_id]
+            entries.append(
+                SourceProvenance(
+                    source_number=citation.source_number,
+                    chunk_id=citation.chunk_id,
+                    file_path=citation.file_path,
+                    start_line=citation.start_line,
+                    end_line=citation.end_line,
+                    retrieval_round=round_no,
+                    retrieval_rank=result.rank,
+                    query_kind=kind,
+                    score=result.score,
+                    selection_order=order[citation.chunk_id],
+                )
+            )
+        return tuple(entries)
+
     # ---------------------------------------------------------------------------------- run
 
     def run(self, question: str, *, max_rounds: int | None = None) -> AgentResult:
@@ -452,6 +513,7 @@ class AgentWorkflow:
             {"recursion_limit": 3 * config.max_rounds + 8},
         )
         return AgentResult(
+            provenance=self._provenance(final),
             question=text,
             decision=final["decision"],
             rounds=final["round"],

@@ -123,7 +123,7 @@ no content word and no identifier at all, such as "What does this function do?"
 |---|---|---|---|---|
 | `symbol_lookup` | base | none | chunks whose symbol/path mention a question symbol or term first | symbol, missing terms, focused terms |
 | `code_explain` | base | none | discovery order | missing terms, focused terms, symbol |
-| `architecture` | 2x base (max 50) | 2 | one chunk per file first, then the rest | missing terms, focused terms |
+| `architecture` | candidate pool (default 50) | 2 | distinct files first, then the rest | missing terms, focused terms |
 | `debugging` | base | none | discovery order | missing terms, symbol, focused terms |
 | `general` | base | none | discovery order | missing terms, focused terms |
 
@@ -182,12 +182,71 @@ partial evidence and the CLI prints a warning; the baseline RAG prompt itself te
 state insufficient evidence. Only an empty evidence set (or a context that cannot fit any chunk)
 abstains without a model call.
 
-Evidence is preserved across rounds and never evicted; the total is capped by
-`COPILOT_AGENT_MAX_EVIDENCE_CHUNKS` (default 15), and the prompt is still bounded by the baseline's
-`COPILOT_RAG_CONTEXT_MAX_TOKENS`. Chunks are deduplicated by `chunk_id` and by
-`(file, start line, end line)`. Metadata is untouched; only `rank` is rewritten (1..n) to carry the
-intent-specific order into the baseline context builder, and `score` stays the cosine of the query
-that found the chunk.
+## Budgets and candidate selection (Milestone 8.1)
+
+Three budgets are separate, applied at three points, and reported separately in the trace:
+
+| Budget | Setting | Applied | Default |
+|---|---|---|---|
+| **Candidate**: chunks requested from the retriever per round | baseline `COPILOT_RETRIEVAL_TOP_K` (5); for architecture `COPILOT_AGENT_ARCHITECTURE_CANDIDATES` | `retrieve` | 5; architecture 50 |
+| **Evidence**: chunks kept across rounds, and per file | `COPILOT_AGENT_MAX_EVIDENCE_CHUNKS`; per-file cap (architecture: 2) | `merge_evidence` | 15; 2 |
+| **Context**: tokens of evidence in the prompt | baseline `COPILOT_RAG_CONTEXT_MAX_TOKENS` | `build_context` | 6000 |
+
+The architecture candidate pool of 50 is an **engineering default** (it equals the retriever's
+maximum), not an empirically optimal value, and nothing here has been tuned.
+
+**Root cause fixed in 8.1.** Milestone 8 requested only twice the baseline top-k (10) for
+architecture questions and applied the per-file cap to those 10. On the frozen snapshot all 10 came
+from `docs/ARCHITECTURE_PLAN.md`: 2 were kept, 8 were discarded, round 2 found nothing new, and the
+run ended with 2 chunks from 1 file. The candidate budget and the per-file cap were coupled, so a
+dominant file starved the selection.
+
+**Selection now.** Each round's candidates are put in a deterministic order `(rank, position,
+chunk_id)`. Architecture selection then makes two passes: pass 1 takes the best candidate of each
+file not yet represented in the evidence; pass 2 fills the remaining capacity with the best remaining
+candidates, honouring the per-file cap. Relevance order decides which chunk and which file comes
+first; diversity decides only that a new file beats a second chunk of an already represented file.
+Existing evidence is never evicted or reordered, duplicates (by `chunk_id` or by file and line span)
+are rejected, and only chunks the retriever returned are ever selected: diversity is never invented.
+Other intents use the unchanged sequential rule (no pool, no per-file cap).
+
+A chunk selected only to add a file may have a low rank (in the real-index run below, retrieval
+rank 46 and 21). Its rank and score are reported honestly in the citation; whether such chunks help
+is not measured.
+
+**What the trace distinguishes** (counts only):
+
+* candidate starvation: `retrieve` shows `top_k` (requested) versus `retrieved` (returned) and
+  `candidate_files`; `merge_evidence` shows `rejected_per_file_cap`;
+* evidence-budget pressure: `rejected_capacity`;
+* repeated evidence: `rejected_duplicate`;
+* context truncation: `generate` shows `context_chunks` versus `evidence_total` and
+  `context_dropped_budget`.
+
+## Citation and provenance semantics
+
+`Citation.rank` and `Citation.score` keep their baseline meaning: the **retrieval rank and cosine
+score of the retrieval that supplied the chunk**. They are not rewritten by the agent. (Milestone 8
+rewrote `rank` to 1..n to carry the evidence order; that conflated rank with order, and it is
+removed.) The agent's order is passed to the context builder with `preserve_order=True`
+(`build_context` and `RagService.answer_from_evidence`; the default is the baseline's rank sort).
+
+| Concept | Where it lives |
+|---|---|
+| original retrieval rank | `Citation.rank`, `SourceProvenance.retrieval_rank` (rank within that round's query) |
+| retrieval round | `SourceProvenance.retrieval_round` |
+| similarity score | `Citation.score`, `SourceProvenance.score` (cosine of that round's query) |
+| selected evidence order | `SourceProvenance.selection_order` |
+| final prompt source number | `Citation.source_number` (`Source n`), also `SourceProvenance.source_number` |
+
+`AgentResult.provenance` has one entry per citation, joined by `chunk_id`. A chunk found in several
+rounds takes its provenance from its **first** retrieval; later occurrences are rejected as
+duplicates and their rank and score are ignored. Ranks and scores from different (refined) queries
+are not comparable and are never used to order or compare evidence across rounds: cross-round order
+is discovery order.
+
+Evidence is preserved across rounds and never evicted; the prompt is still bounded by the baseline's
+`COPILOT_RAG_CONTEXT_MAX_TOKENS`.
 
 ## Generation and security
 
@@ -210,8 +269,10 @@ that found the chunk.
 ## Trace
 
 Every node appends a `TraceEvent`: node, round, intent, duration, safe query metadata (kind,
-character count, word count, a 12-hex hash, never the text), counts retrieved / newly accepted /
-total, assessment outcome, term coverage, routing decision, termination reason, generation status.
+character count, word count, a 12-hex hash, never the text), candidates requested / returned and
+their distinct files, chunks accepted and rejected (duplicate, per-file cap, evidence capacity),
+distinct evidence files, final context chunk count and chunks dropped for the token budget,
+assessment outcome, term coverage, routing decision, termination reason, generation status.
 It never contains the question, refined queries, source text, prompts, model output, provider error
 bodies, keys, or scanner findings. Example (a scripted offline scenario, three rounds):
 
@@ -239,6 +300,7 @@ Agent settings are separate from the baseline's (`.env.example`):
 | `COPILOT_AGENT_MAX_EVIDENCE_CHUNKS` | 15 | 1-50 | accumulated evidence cap |
 | `COPILOT_AGENT_MIN_TERM_COVERAGE` | 0.5 | 0-1 | heuristic threshold |
 | `COPILOT_AGENT_ARCHITECTURE_MIN_FILES` | 2 | 1-10 | distinct files for architecture questions |
+| `COPILOT_AGENT_ARCHITECTURE_CANDIDATES` | 50 | 1-50 | candidate pool per round for architecture (engineering default, not tuned) |
 
 The per-round chunk count starts from the baseline's `COPILOT_RETRIEVAL_TOP_K`.
 
@@ -285,5 +347,14 @@ baseline and evaluation-artifact compatibility. **These tests do not establish r
 * Intent rules are English regexes written by hand; unusual phrasings fall back to `general`.
 * Refinement uses more retrieval calls, so latency grows with rounds; embedding cost is local.
 * There is no agentic-vs-baseline accuracy result. Do not cite one.
+* The candidate pool cannot create diversity that the ranking does not contain. On the frozen
+  snapshot the 50 nearest chunks for "Explain the architecture of this repository" come from only
+  two files, both documentation (`docs/ARCHITECTURE_PLAN.md`, `README.md`): the question is
+  semantically closest to prose, not to source modules. The "at least 2 files" check is then
+  satisfied by two documents, which says nothing about whether source code was found. Expect a
+  documentation-heavy architecture context until a retrieval change (not part of this milestone)
+  addresses it.
+* Distinct-file preference can select a low-ranked chunk (rank 46 in that run) to add a file; its
+  relevance is unmeasured.
 * The evidence-based debugging assistant, structure-aware chunking and the chunking experiment are
   later milestones.

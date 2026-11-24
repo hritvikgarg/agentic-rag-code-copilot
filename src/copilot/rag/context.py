@@ -84,14 +84,21 @@ def _context_tag(results: Sequence[RetrievalResult]) -> str:
     return digest.hexdigest()[:8]
 
 
-def build_context(results: Sequence[RetrievalResult], max_tokens: int) -> BuiltContext:
+def build_context(
+    results: Sequence[RetrievalResult], max_tokens: int, *, preserve_order: bool = False
+) -> BuiltContext:
     """Select and format evidence within ``max_tokens`` estimated tokens.
 
-    ``results`` may come in any order; they are ranked by ``(rank, position)`` first.
+    By default ``results`` may come in any order; they are ranked by ``(rank, position)`` first
+    (the baseline behaviour). With ``preserve_order=True`` the caller's order is kept as given and
+    ``rank`` is left untouched as pure provenance: the agentic workflow orders evidence from
+    several retrieval rounds, whose ranks are not comparable with each other.
     """
     if max_tokens < 1:
         raise ValueError("max_tokens must be >= 1")
-    ordered = sorted(results, key=lambda r: (r.rank, r.position))
+    ordered = (
+        list(results) if preserve_order else sorted(results, key=lambda r: (r.rank, r.position))
+    )
     taken_ids: set[str] = set()
     taken_spans: set[tuple[str, int, int]] = set()
     included: list[RetrievalResult] = []
