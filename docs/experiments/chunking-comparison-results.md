@@ -91,8 +91,10 @@ better at the smallest budget.
 * D improved over A (2): `impl-ingest`, `impl-chunk-id`; D regressed: none.
 * B improved over C (3): `impl-index-id`, `impl-skip-reasons`, `doc-atomic`. B regressed vs C (2):
   `impl-faiss-persist`, `impl-fake-embedder`.
-* All four arms miss in the top 10: `impl-embed-config`, `doc-query-doc`.
-* All four arms hit in the top 5: 23 questions, i.e. most of the benchmark does not discriminate.
+* Partition of all 34 questions by outcome (two endpoints; see section 10 for the exact lists):
+  at **Hit@5**, 23 questions are hit by every arm, 3 are missed by every arm and 8 differ between
+  arms (23 + 3 + 8 = 34); at **Hit@10**, 25 are hit by every arm, 2 are missed by every arm and 7
+  differ (25 + 2 + 7 = 34). Most of the benchmark therefore does not discriminate between arms.
 
 ## 5. Error analysis (done after evaluation; nothing was retuned)
 
@@ -111,9 +113,13 @@ better at the smallest budget.
    259-275 and `atomic.py` lines 60-82). A's single 490-token window of `index.py` covers the first;
    B's top 5 is the backend `serialize` helper and four documentation windows. Fragmentation can
    lose a multi-function answer. [Likely]
-4. **Misses shared by all arms** are not chunking problems: `impl-embed-config` (a 10-line settings
-   block) and `doc-query-doc` (a 5-line documentation passage) are crowded out by other documents
-   or by generic definitions in every arm. Documentation is chunked identically in all arms.
+4. **Misses shared by all arms** (`impl-embed-config`, a 10-line settings block, and
+   `doc-query-doc`, a 5-line documentation passage, are missed in the top 10 by every arm, and
+   `impl-sensitive-files` is also missed in the top 5 by every arm). In these cases the top-ranked
+   results were mostly documentation windows or generic definitions, so documentation crowding is
+   an *observed potential contributor* to these failures. It was not tested as a cause (for example
+   by excluding documentation from the index). Documentation is chunked identically in all arms,
+   so these misses do not depend on the chunking strategy being compared.
 5. **Merging (D)** keeps definitions that are too large to merge as their own chunks, and those
    hit (`impl-ingest`, `impl-chunk-id`). It loses `impl-long-line`, `impl-index-id` and
    `impl-skip-reasons`, where B's small single-definition chunk (with its symbol name) was the hit
@@ -136,8 +142,11 @@ better at the smallest budget.
 | C | 827 | 2,938,087 | 1000 s | 62.6 ms | 78.3 ms |
 | D | 422 | 1,509,540 | 1037 s | 62.3 ms | 78.4 ms |
 
-B costs 1.6× the chunks, +62 % index bytes and about +25 % embedding time over A; query latency is
-indistinguishable (170 samples per arm; the flat index is small and the query embedding dominates).
+B costs 1.6× the chunks, +62 % index bytes and about +25 % embedding time over A. Observed query
+latency is similar across the arms (medians 62.3 to 62.8 ms, 170 samples per arm, one machine);
+the experiment was not designed to detect small latency differences. A plausible reason is that
+the flat index is small and the per-query work does not depend on chunk count much
+[Guessing: not profiled].
 B returns 39 % fewer tokens for the same top-10 (2677 vs 4363), which is relevant to LLM context
 cost. Embedding seconds are sums of measured batch times (batch size 8, resumable, sandbox CPU);
 they are comparable between arms here but not with a Windows machine. [Certain]
@@ -151,18 +160,25 @@ they are comparable between arms here but not with a Windows machine. [Certain]
    distinguishable from zero** (exact McNemar p = 0.219; CI [0.0, +26.5] pp).
 2. [Certain] AST chunking did not improve, and numerically lowered, Hit@1 and MRR (not
    significant).
-3. [Likely] Much of the Hit@5 gain is explained by smaller chunks rather than by structure: a
-   structure-blind arm of matched median size reached 28/34, one question short of B (B − C = +2.9 pp,
-   CI [−8.8, +14.7]).
-4. [Likely, exploratory] Structure adds *coverage* of the relevant region beyond size (B − C region
-   coverage@5 +0.205, CI [+0.081, +0.336]; coverage-hit@5 +26.5 pp, raw p = 0.012). It does not
-   survive Holm correction (p = 0.516) and should be tested on a larger benchmark.
+3. [Likely] The size-matched line-based control recovered much of the observed Hit@5 difference
+   (C 28/34 vs B 29/34 and A 25/34; B − C = +2.9 pp, CI [−8.8, +14.7]). This suggests that chunk
+   size may contribute to the improvement, but the experiment does not isolate its causal
+   contribution from structural boundaries, overlap, chunk count or other differences between the
+   arms (for example, C has about 1.3× the Python chunks of B and no overlap, and A uses overlap).
+4. [Guessing, exploratory] Structure may add coverage of the relevant region beyond size (B − C
+   region coverage@5 +0.205, CI [+0.081, +0.336]; coverage-hit@5 +26.5 pp, raw p = 0.012). It does
+   not survive Holm correction (p = 0.516), so it is a hypothesis for a larger benchmark, not a
+   finding.
 5. [Certain] AST chunking costs more chunks, disk and embedding time and returns less text per
-   top-k; retrieval latency is unaffected.
+   top-k; observed retrieval latency was similar across arms.
 
 **Not supported**
 
 * That AST chunking is better than line chunking. The only pre-registered test is not significant.
+* That chunk size (or any single factor) *causes* the differences between arms.
+* That documentation crowding *causes* the shared misses.
+* That the production default should change. **The baseline line-window strategy remains the
+  production default** (`Settings.chunking_strategy = "line"`); `ast` stays an opt-in strategy.
 * That any arm produces better *answers*; no generation was run.
 * That B and C (or B and D) are equivalent; failing to reject is not evidence of equivalence.
 * Anything about D as a clean structure-at-equal-size test (not size-matched).
@@ -181,8 +197,9 @@ they are comparable between arms here but not with a Windows machine. [Certain]
   every arm.
 * The embedding step used the resumable path with batch size 8 on Linux. Arm A's `chunks.jsonl` and
   `index.faiss` are byte-identical to the existing Windows-built index (same SHA-256), which is
-  evidence that batching and platform did not change the vectors; the manifest differs only in
-  build metadata.
+  consistent with batching and platform not having changed the vectors for that arm; the manifest
+  differs (build metadata). This does not prove the same for B, C and D, which have no earlier
+  index to compare with.
 * Native Windows verification of Milestone 9 remains the user's open step.
 
 ## 9. Reproduction (Windows PowerShell, from the repository root)
@@ -213,3 +230,57 @@ The sandbox that produced the committed results could not keep a process alive f
 --repetition 0..4`, `--phase finalize`. On a normal machine the single commands above are enough.
 Results should reproduce exactly for ranks and statistics given identical vectors; latency and
 embedding seconds are machine-dependent.
+
+## 10. Closeout verification of the reported numbers
+
+Everything in this section is recomputed from the saved machine-readable results by an independent
+script, `experiments/chunking-comparison/closeout/verify_results.py` (output:
+`experiments/chunking-comparison/closeout/verification.json`; it reports no discrepancy). It does
+not import the experiment package and changes no result.
+
+**Counts and endpoints.** A question counts as a hit at k when the first relevant rank (any-overlap
+rule, same file and at least one shared line) is at most k. All 34 question ids are unique and
+appear in the same order in all four arms. The earlier summary "23 hit by all, 2 missed by all, 8
+differ" mixed two endpoints and summed to 33; the consistent statements are:
+
+| Endpoint | Hit by all four arms | Missed by all four arms | Arms differ | Total |
+|---|---|---|---|---|
+| Hit@5 | 23 | 3 (`impl-embed-config`, `impl-sensitive-files`, `doc-query-doc`) | 8 | 34 |
+| Hit@10 | 25 | 2 (`impl-embed-config`, `doc-query-doc`) | 7 | 34 |
+
+The 8 questions that differ at Hit@5 are `impl-ingest`, `impl-chunk-id`, `impl-faiss-persist`,
+`impl-long-line`, `impl-fake-embedder`, `impl-index-id`, `impl-skip-reasons` and `doc-atomic`.
+
+**Primary paired table (B vs A, Hit@5).** Both hit 24, only B hit 5, only A hit 1, neither hit 4
+(total 34). The recomputed exact two-sided McNemar p-value is 0.21875 (= 2 × 7/64 for 5 vs 1
+discordant pairs), equal to the saved value.
+
+**Bootstrap interval.** Paired percentile bootstrap: the 34 questions are resampled with
+replacement (seed 20261027, 20,000 resamples, `numpy.random.default_rng(seed).integers`), the same
+resampled index matrix is used for every comparison, the statistic is the mean per-question
+difference (B minus A) in percentage points, and the interval is the 2.5th to 97.5th percentile of
+the resampled means (`numpy.quantile`, linear interpolation). Recomputed: +11.76 pp, [0.0, +26.47].
+The lower limit of exactly 0.0 occurs because every resampled mean is a multiple of 1/34
+(2.94 pp), so the interval lies on a coarse grid. It describes this benchmark, which is not a random sample of
+questions, so it is not a population interval. The bootstrap interval and the McNemar test are
+different procedures and need not agree about 0.
+
+**Persisted index size.** The sum of the byte sizes of the three persisted index files
+(`chunks.jsonl`, `index.faiss`, `manifest.json`); for Arm A 201,650 + 1,299,501 + 1,430 =
+1,502,581. It excludes the embedding cache, the model cache and the snapshot. The recorded sizes
+equal the sizes currently on disk.
+
+**Embedding duration.** The sum of the wall-clock durations of the individual
+`embed_documents` batch calls (batch size 8) that were recorded when each batch was first computed
+in the arm's own cache. It therefore excludes waiting between resumable execution slices, model
+loading (timed separately: 6.0 to 8.7 s per arm and recorded as `model_cold_start_seconds`), file
+discovery, chunking and index writing. It includes tokenisation inside each batch and any
+first-call runtime warm-up per slice, which was not separated out. Slices ran on a 2-CPU Linux sandbox, so
+absolute seconds are comparable between arms in this experiment but not with another machine.
+
+**Fixed-context candidate pool and selection policy.** For each question and arm the ranked pool
+is the top 30 chunks of exact search. The production `build_context` walks the pool in rank
+order: duplicates (same chunk id or same file and line span) are dropped, a chunk whose formatted
+block (plus separator) does not fit in the remaining budget is dropped whole (never truncated) and
+later, smaller chunks may still be included; formatting overhead counts towards the 512, 1024 or
+2048 estimated-token budget. Design text: section 8 of `chunking-comparison.md`.

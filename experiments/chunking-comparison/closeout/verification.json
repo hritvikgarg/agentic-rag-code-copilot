@@ -1,0 +1,210 @@
+{
+  "hit@10_counts": {
+    "A": 27,
+    "B": 30,
+    "C": 28,
+    "D": 28
+  },
+  "hit@1_counts": {
+    "A": 19,
+    "B": 14,
+    "C": 10,
+    "D": 14
+  },
+  "hit@3_counts": {
+    "A": 24,
+    "B": 27,
+    "C": 23,
+    "D": 25
+  },
+  "hit@5_counts": {
+    "A": 25,
+    "B": 29,
+    "C": 28,
+    "D": 27
+  },
+  "index_sizes": {
+    "A": {
+      "embedding_seconds_recorded": 1059.9620114340141,
+      "files": {
+        "chunks.jsonl": 201650,
+        "index.faiss": 1299501,
+        "manifest.json": 1430
+      },
+      "model_cold_start_seconds_not_included": 7.46482846300205,
+      "on_disk_now": {
+        "chunks.jsonl": 201650,
+        "index.faiss": 1299501,
+        "manifest.json": 1430
+      },
+      "saved_index_total": 1502581,
+      "sum_of_files": 1502581
+    },
+    "B": {
+      "embedding_seconds_recorded": 1320.3739883420167,
+      "files": {
+        "chunks.jsonl": 347512,
+        "index.faiss": 2085933,
+        "manifest.json": 1475
+      },
+      "model_cold_start_seconds_not_included": 8.671355017999304,
+      "on_disk_now": {
+        "chunks.jsonl": 347512,
+        "index.faiss": 2085933,
+        "manifest.json": 1475
+      },
+      "saved_index_total": 2434920,
+      "sum_of_files": 2434920
+    },
+    "C": {
+      "embedding_seconds_recorded": 999.4931687159988,
+      "files": {
+        "chunks.jsonl": 395998,
+        "index.faiss": 2540589,
+        "manifest.json": 1500
+      },
+      "model_cold_start_seconds_not_included": 6.027365720001399,
+      "on_disk_now": {
+        "chunks.jsonl": 395998,
+        "index.faiss": 2540589,
+        "manifest.json": 1500
+      },
+      "saved_index_total": 2938087,
+      "sum_of_files": 2938087
+    },
+    "D": {
+      "embedding_seconds_recorded": 1037.385882960003,
+      "files": {
+        "chunks.jsonl": 211575,
+        "index.faiss": 1296429,
+        "manifest.json": 1536
+      },
+      "model_cold_start_seconds_not_included": 6.498557932001859,
+      "on_disk_now": {
+        "chunks.jsonl": 211575,
+        "index.faiss": 1296429,
+        "manifest.json": 1536
+      },
+      "saved_index_total": 1509540,
+      "sum_of_files": 1509540
+    }
+  },
+  "partition_at_hit@10": {
+    "all_arms_hit": [
+      "impl-ingest",
+      "impl-chunk-id",
+      "impl-unsafe-paths",
+      "impl-logging",
+      "impl-log-redact",
+      "impl-symlinks",
+      "impl-read-decode",
+      "impl-token-estimate",
+      "impl-windows",
+      "impl-normalize-vectors",
+      "impl-embed-text",
+      "impl-model-load",
+      "impl-fingerprint",
+      "impl-vector-order",
+      "impl-index-load",
+      "impl-build-pipeline",
+      "impl-chunker-select",
+      "impl-chunk-stats",
+      "impl-token-validation",
+      "impl-settings-load",
+      "impl-newlines",
+      "doc-sensitive",
+      "doc-cosine",
+      "doc-chunk-algo",
+      "doc-symlink"
+    ],
+    "all_arms_miss": [
+      "impl-embed-config",
+      "doc-query-doc"
+    ],
+    "arms_differ": [
+      "impl-faiss-persist",
+      "impl-sensitive-files",
+      "impl-long-line",
+      "impl-fake-embedder",
+      "impl-index-id",
+      "impl-skip-reasons",
+      "doc-atomic"
+    ],
+    "counts": {
+      "all_arms_hit": 25,
+      "all_arms_miss": 2,
+      "arms_differ": 7
+    }
+  },
+  "partition_at_hit@5": {
+    "all_arms_hit": [
+      "impl-unsafe-paths",
+      "impl-logging",
+      "impl-log-redact",
+      "impl-symlinks",
+      "impl-read-decode",
+      "impl-token-estimate",
+      "impl-windows",
+      "impl-normalize-vectors",
+      "impl-embed-text",
+      "impl-model-load",
+      "impl-fingerprint",
+      "impl-vector-order",
+      "impl-index-load",
+      "impl-build-pipeline",
+      "impl-chunker-select",
+      "impl-chunk-stats",
+      "impl-token-validation",
+      "impl-settings-load",
+      "impl-newlines",
+      "doc-sensitive",
+      "doc-cosine",
+      "doc-chunk-algo",
+      "doc-symlink"
+    ],
+    "all_arms_miss": [
+      "impl-embed-config",
+      "impl-sensitive-files",
+      "doc-query-doc"
+    ],
+    "arms_differ": [
+      "impl-ingest",
+      "impl-chunk-id",
+      "impl-faiss-persist",
+      "impl-long-line",
+      "impl-fake-embedder",
+      "impl-index-id",
+      "impl-skip-reasons",
+      "doc-atomic"
+    ],
+    "counts": {
+      "all_arms_hit": 23,
+      "all_arms_miss": 3,
+      "arms_differ": 8
+    }
+  },
+  "primary_B_vs_A_hit@5": {
+    "bootstrap": {
+      "confidence": 0.95,
+      "method": "paired percentile bootstrap of the mean per-question difference",
+      "resamples": 20000,
+      "seed": 20261027
+    },
+    "bootstrap_ci_pp": [
+      0.0,
+      26.47058823529412
+    ],
+    "difference_pp": 11.76470588235294,
+    "matches_saved": true,
+    "mcnemar_exact_two_sided_p": 0.21875,
+    "table": {
+      "both": 24,
+      "neither": 4,
+      "only_x": 5,
+      "only_y": 1
+    }
+  },
+  "problems": [],
+  "questions": 34,
+  "unique_question_ids": 34
+}
