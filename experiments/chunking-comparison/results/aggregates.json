@@ -1,0 +1,371 @@
+{
+  "arms": {
+    "A": {
+      "binary": {
+        "budget_hit@1024": {
+          "count": 23,
+          "rate": 0.6764705882352942
+        },
+        "budget_hit@2048": {
+          "count": 25,
+          "rate": 0.7352941176470589
+        },
+        "budget_hit@512": {
+          "count": 18,
+          "rate": 0.5294117647058824
+        },
+        "coverage_hit@10": {
+          "count": 26,
+          "rate": 0.7647058823529411
+        },
+        "coverage_hit@5": {
+          "count": 21,
+          "rate": 0.6176470588235294
+        },
+        "hit@1": {
+          "count": 19,
+          "rate": 0.5588235294117647
+        },
+        "hit@10": {
+          "count": 27,
+          "rate": 0.7941176470588235
+        },
+        "hit@3": {
+          "count": 24,
+          "rate": 0.7058823529411765
+        },
+        "hit@5": {
+          "count": 25,
+          "rate": 0.7352941176470589
+        }
+      },
+      "budgets": {
+        "1024": {
+          "mean_chunks": 2.411764705882353,
+          "mean_distinct_files": 2.088235294117647,
+          "mean_dropped_for_budget": 27.58823529411765,
+          "mean_tokens": 946.7941176470588,
+          "mean_utilization": 0.9246036305147058
+        },
+        "2048": {
+          "mean_chunks": 4.617647058823529,
+          "mean_distinct_files": 3.176470588235294,
+          "mean_dropped_for_budget": 25.38235294117647,
+          "mean_tokens": 1966.4411764705883,
+          "mean_utilization": 0.9601763556985294
+        },
+        "512": {
+          "mean_chunks": 1.411764705882353,
+          "mean_distinct_files": 1.411764705882353,
+          "mean_dropped_for_budget": 28.58823529411765,
+          "mean_tokens": 436.55882352941177,
+          "mean_utilization": 0.8526539522058824
+        }
+      },
+      "continuous": {
+        "budget_coverage@1024": 0.4905870374555023,
+        "budget_coverage@2048": 0.6011362894863035,
+        "budget_coverage@512": 0.3500149008052091,
+        "coverage@10": 0.7349377693360377,
+        "coverage@5": 0.6222630928335191,
+        "mrr@10": 0.6473389355742297
+      },
+      "first_rank": {
+        "mean": 1.7407407407407407,
+        "median": 1,
+        "questions_with_hit_in_top10": 27
+      },
+      "n_questions": 34,
+      "size": {
+        "mean_distinct_files_top10": 5.029411764705882,
+        "mean_lines_per_hit": 44.03703703703704,
+        "mean_retrieved_lines": 39.85,
+        "mean_retrieved_tokens_top10": 4362.823529411765
+      }
+    },
+    "B": {
+      "binary": {
+        "budget_hit@1024": {
+          "count": 26,
+          "rate": 0.7647058823529411
+        },
+        "budget_hit@2048": {
+          "count": 30,
+          "rate": 0.8823529411764706
+        },
+        "budget_hit@512": {
+          "count": 20,
+          "rate": 0.5882352941176471
+        },
+        "coverage_hit@10": {
+          "count": 29,
+          "rate": 0.8529411764705882
+        },
+        "coverage_hit@5": {
+          "count": 27,
+          "rate": 0.7941176470588235
+        },
+        "hit@1": {
+          "count": 14,
+          "rate": 0.4117647058823529
+        },
+        "hit@10": {
+          "count": 30,
+          "rate": 0.8823529411764706
+        },
+        "hit@3": {
+          "count": 27,
+          "rate": 0.7941176470588235
+        },
+        "hit@5": {
+          "count": 29,
+          "rate": 0.8529411764705882
+        }
+      },
+      "budgets": {
+        "1024": {
+          "mean_chunks": 4.588235294117647,
+          "mean_distinct_files": 3.235294117647059,
+          "mean_dropped_for_budget": 25.41176470588235,
+          "mean_tokens": 990.4705882352941,
+          "mean_utilization": 0.9672564338235294
+        },
+        "2048": {
+          "mean_chunks": 8.117647058823529,
+          "mean_distinct_files": 4.970588235294118,
+          "mean_dropped_for_budget": 21.88235294117647,
+          "mean_tokens": 2018.8823529411766,
+          "mean_utilization": 0.9857823988970589
+        },
+        "512": {
+          "mean_chunks": 3.176470588235294,
+          "mean_distinct_files": 2.323529411764706,
+          "mean_dropped_for_budget": 26.823529411764707,
+          "mean_tokens": 484.9117647058824,
+          "mean_utilization": 0.9470932904411765
+        }
+      },
+      "continuous": {
+        "budget_coverage@1024": 0.6272482052724098,
+        "budget_coverage@2048": 0.7606887435423871,
+        "budget_coverage@512": 0.4325395968973711,
+        "coverage@10": 0.8041422350274432,
+        "coverage@5": 0.711600818461338,
+        "mrr@10": 0.592436974789916
+      },
+      "first_rank": {
+        "mean": 2.033333333333333,
+        "median": 2.0,
+        "questions_with_hit_in_top10": 30
+      },
+      "n_questions": 34,
+      "size": {
+        "mean_distinct_files_top10": 5.352941176470588,
+        "mean_lines_per_hit": 23.166666666666668,
+        "mean_retrieved_lines": 23.123529411764707,
+        "mean_retrieved_tokens_top10": 2677.1470588235293
+      }
+    },
+    "C": {
+      "binary": {
+        "budget_hit@1024": {
+          "count": 27,
+          "rate": 0.7941176470588235
+        },
+        "budget_hit@2048": {
+          "count": 28,
+          "rate": 0.8235294117647058
+        },
+        "budget_hit@512": {
+          "count": 25,
+          "rate": 0.7352941176470589
+        },
+        "coverage_hit@10": {
+          "count": 23,
+          "rate": 0.6764705882352942
+        },
+        "coverage_hit@5": {
+          "count": 18,
+          "rate": 0.5294117647058824
+        },
+        "hit@1": {
+          "count": 10,
+          "rate": 0.29411764705882354
+        },
+        "hit@10": {
+          "count": 28,
+          "rate": 0.8235294117647058
+        },
+        "hit@3": {
+          "count": 23,
+          "rate": 0.6764705882352942
+        },
+        "hit@5": {
+          "count": 28,
+          "rate": 0.8235294117647058
+        }
+      },
+      "budgets": {
+        "1024": {
+          "mean_chunks": 5.588235294117647,
+          "mean_distinct_files": 3.088235294117647,
+          "mean_dropped_for_budget": 24.41176470588235,
+          "mean_tokens": 989.6176470588235,
+          "mean_utilization": 0.9664234834558824
+        },
+        "2048": {
+          "mean_chunks": 9.882352941176471,
+          "mean_distinct_files": 4.529411764705882,
+          "mean_dropped_for_budget": 20.11764705882353,
+          "mean_tokens": 2015.4117647058824,
+          "mean_utilization": 0.9840877757352942
+        },
+        "512": {
+          "mean_chunks": 3.1470588235294117,
+          "mean_distinct_files": 2.0588235294117645,
+          "mean_dropped_for_budget": 26.852941176470587,
+          "mean_tokens": 479.94117647058823,
+          "mean_utilization": 0.9373851102941176
+        }
+      },
+      "continuous": {
+        "budget_coverage@1024": 0.5028884330469442,
+        "budget_coverage@2048": 0.625544074380787,
+        "budget_coverage@512": 0.36974617032249907,
+        "coverage@10": 0.6354515798931134,
+        "coverage@5": 0.5066800585358314,
+        "mrr@10": 0.49950980392156863
+      },
+      "first_rank": {
+        "mean": 2.2142857142857144,
+        "median": 2.0,
+        "questions_with_hit_in_top10": 28
+      },
+      "n_questions": 34,
+      "size": {
+        "mean_distinct_files_top10": 4.411764705882353,
+        "mean_lines_per_hit": 16.0,
+        "mean_retrieved_lines": 17.68235294117647,
+        "mean_retrieved_tokens_top10": 2021.9411764705883
+      }
+    },
+    "D": {
+      "binary": {
+        "budget_hit@1024": {
+          "count": 23,
+          "rate": 0.6764705882352942
+        },
+        "budget_hit@2048": {
+          "count": 26,
+          "rate": 0.7647058823529411
+        },
+        "budget_hit@512": {
+          "count": 16,
+          "rate": 0.47058823529411764
+        },
+        "coverage_hit@10": {
+          "count": 27,
+          "rate": 0.7941176470588235
+        },
+        "coverage_hit@5": {
+          "count": 25,
+          "rate": 0.7352941176470589
+        },
+        "hit@1": {
+          "count": 14,
+          "rate": 0.4117647058823529
+        },
+        "hit@10": {
+          "count": 28,
+          "rate": 0.8235294117647058
+        },
+        "hit@3": {
+          "count": 25,
+          "rate": 0.7352941176470589
+        },
+        "hit@5": {
+          "count": 27,
+          "rate": 0.7941176470588235
+        }
+      },
+      "budgets": {
+        "1024": {
+          "mean_chunks": 2.7058823529411766,
+          "mean_distinct_files": 2.2058823529411766,
+          "mean_dropped_for_budget": 27.294117647058822,
+          "mean_tokens": 967.4411764705883,
+          "mean_utilization": 0.9447667738970589
+        },
+        "2048": {
+          "mean_chunks": 5.0588235294117645,
+          "mean_distinct_files": 3.5294117647058822,
+          "mean_dropped_for_budget": 24.941176470588236,
+          "mean_tokens": 1987.1176470588234,
+          "mean_utilization": 0.9702722886029411
+        },
+        "512": {
+          "mean_chunks": 1.4705882352941178,
+          "mean_distinct_files": 1.4411764705882353,
+          "mean_dropped_for_budget": 28.529411764705884,
+          "mean_tokens": 450.8529411764706,
+          "mean_utilization": 0.8805721507352942
+        }
+      },
+      "continuous": {
+        "budget_coverage@1024": 0.5558527660386945,
+        "budget_coverage@2048": 0.6889022408893635,
+        "budget_coverage@512": 0.3396036617838062,
+        "coverage@10": 0.7747765468540576,
+        "coverage@5": 0.7081250437699957,
+        "mrr@10": 0.5848039215686275
+      },
+      "first_rank": {
+        "mean": 2.0,
+        "median": 1.5,
+        "questions_with_hit_in_top10": 28
+      },
+      "n_questions": 34,
+      "size": {
+        "mean_distinct_files_top10": 5.294117647058823,
+        "mean_lines_per_hit": 37.357142857142854,
+        "mean_retrieved_lines": 36.12647058823529,
+        "mean_retrieved_tokens_top10": 4054.176470588235
+      }
+    }
+  },
+  "efficiency": {
+    "A": {
+      "chunk_count": 423,
+      "index_bytes": 1502581,
+      "seconds_build_total": 1062.9756059670108,
+      "seconds_chunk": 0.09830229999715812,
+      "seconds_embed": 1059.9620114340141,
+      "vector_count": 423
+    },
+    "B": {
+      "chunk_count": 679,
+      "index_bytes": 2434920,
+      "seconds_build_total": 1323.8778529350166,
+      "seconds_chunk": 0.18284715200206847,
+      "seconds_embed": 1320.3739883420167,
+      "vector_count": 679
+    },
+    "C": {
+      "chunk_count": 827,
+      "index_bytes": 2938087,
+      "seconds_build_total": 1004.6385344329974,
+      "seconds_chunk": 0.10095701899990672,
+      "seconds_embed": 999.4931687159988,
+      "vector_count": 827
+    },
+    "D": {
+      "chunk_count": 422,
+      "index_bytes": 1509540,
+      "seconds_build_total": 1040.2264309070015,
+      "seconds_chunk": 0.2508522099997208,
+      "seconds_embed": 1037.385882960003,
+      "vector_count": 422
+    }
+  },
+  "schema": "chunking-experiment-aggregates/1"
+}

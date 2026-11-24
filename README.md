@@ -11,10 +11,13 @@ it used.
 > Streamlit UI over a service layer, a plain-vs-RAG comparison framework (resumable, with a
 > quota circuit breaker), and a bounded agentic RAG workflow. **No result in this repository
 > shows that RAG, or the agentic workflow, answers better than a plain LLM or than baseline RAG:
-> the comparison is not yet complete or rated, and the agent has only been tested offline. Nor is
-> there any result showing that structure-aware chunking retrieves better than the baseline: that
-> experiment (Milestone 10) has not been run.**
-> The chunking experiment and debugging assistance are **planned.** See
+> the comparison is not yet complete or rated, and the agent has only been tested offline. The
+> Milestone 10 retrieval experiment (offline, 34 questions) found 4 more top-5 hits for AST
+> chunking than for baseline line windows (5 gains, 1 loss) but **that difference is not
+> statistically distinguishable from zero** (exact McNemar p = 0.219) and Hit@1 / MRR moved the
+> other way; it measured retrieval only, not answer quality. Results and limits:
+> [`docs/experiments/chunking-comparison-results.md`](docs/experiments/chunking-comparison-results.md).**
+> Debugging assistance is **planned.** See
 > [Current implementation status](#current-implementation-status).
 
 ## Academic context
@@ -109,7 +112,8 @@ agentic-rag-code-copilot/
 └── data/                   # local runtime data; contents are git-ignored
 ```
 
-Directories still to be added when first needed: `scripts/`, `results/` (Milestone 10).
+Directories still to be added when first needed: `scripts/`. Milestone 10 results live in
+`experiments/chunking-comparison/` (design, results, generated report).
 
 ## Current implementation status
 
@@ -134,7 +138,8 @@ Directories still to be added when first needed: `scripts/`, `results/` (Milesto
   `qualified_name` / `parent_class`, and falls back to the baseline's line windows for other
   languages, Markdown, config files and unparseable Python. `python -m copilot.chunking.compare`
   prints descriptive chunk-shape statistics for both strategies; **it does not measure retrieval
-  quality** (Milestone 10). Details, policies and limitations: [`docs/chunking.md`](docs/chunking.md).
+  quality** (see the Milestone 10 experiment in
+  [`docs/experiments/chunking-comparison-results.md`](docs/experiments/chunking-comparison-results.md)). Details, policies and limitations: [`docs/chunking.md`](docs/chunking.md).
 - **Local embedding service** (`copilot.embeddings`): an `Embedder` interface (`embed_documents`,
   `embed_query`, `count_tokens`), a fastembed/ONNX adapter for `jinaai/jina-embeddings-v2-base-code`
   (768-d, unit-length vectors), a deterministic fake for tests, batching, a documented model cache,

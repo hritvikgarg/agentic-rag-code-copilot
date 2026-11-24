@@ -1,0 +1,5 @@
+arm,chunks,index bytes,chunking s,embedding s,build total s,latency median ms,latency p95 ms,latency samples
+A,423,1502581,0.10,1060.0,1063.0,62.8,79.0,170
+B,679,2434920,0.18,1320.4,1323.9,62.3,81.3,170
+C,827,2938087,0.10,999.5,1004.6,62.6,78.3,170
+D,422,1509540,0.25,1037.4,1040.2,62.3,78.4,170

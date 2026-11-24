@@ -1,0 +1,33 @@
+{
+  "config_sha256": "680a87c57a8e74e64f4d488a16f671eb259ff8a3a3c8e1fa013c4bf8324451d0",
+  "environment": {
+    "cpu_count": 2,
+    "environment_variables": {
+      "COPILOT_EMBEDDING_BATCH_SIZE": "8",
+      "HF_HUB_OFFLINE": "1"
+    },
+    "git_head": "b64da49dda7925ff098c74e778d4354da9fcf3bd",
+    "machine": "x86_64",
+    "memory_bytes": 4105613312,
+    "packages": {
+      "faiss-cpu": "1.15.1",
+      "fastembed": "0.8.0",
+      "numpy": "2.5.3",
+      "onnxruntime": "1.30.0",
+      "pydantic": "2.13.5",
+      "tokenizers": "0.23.2"
+    },
+    "platform": "Linux-6.8.0-149-generic-x86_64-with-glibc2.35",
+    "processor": "x86_64",
+    "python": "3.12.14"
+  },
+  "files": [
+    "per-question.json",
+    "aggregates.json",
+    "paired-statistics.json",
+    "latency.json"
+  ],
+  "finished_utc": "2026-11-24T18:45:00Z",
+  "schema": "chunking-experiment-run/1",
+  "started_utc": "2026-11-24T18:44:53Z"
+}

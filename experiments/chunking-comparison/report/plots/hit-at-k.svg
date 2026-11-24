@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" font-family="sans-serif" font-size="12">
+<title>Hit@k by arm (primary any-overlap rule)</title>
+<rect width="640" height="360" fill="#ffffff"/>
+<text x="320.0" y="18" text-anchor="middle" font-size="14" fill="#222222">Hit@k by arm (primary any-overlap rule)</text>
+<line x1="56" y1="304.0" x2="624" y2="304.0" stroke="#d0d0d0"/>
+<text x="50" y="308.0" text-anchor="end" fill="#222222">0</text>
+<line x1="56" y1="250.4" x2="624" y2="250.4" stroke="#d0d0d0"/>
+<text x="50" y="254.4" text-anchor="end" fill="#222222">20</text>
+<line x1="56" y1="196.8" x2="624" y2="196.8" stroke="#d0d0d0"/>
+<text x="50" y="200.8" text-anchor="end" fill="#222222">40</text>
+<line x1="56" y1="143.2" x2="624" y2="143.2" stroke="#d0d0d0"/>
+<text x="50" y="147.2" text-anchor="end" fill="#222222">60</text>
+<line x1="56" y1="89.6" x2="624" y2="89.6" stroke="#d0d0d0"/>
+<text x="50" y="93.6" text-anchor="end" fill="#222222">80</text>
+<line x1="56" y1="36.0" x2="624" y2="36.0" stroke="#d0d0d0"/>
+<text x="50" y="40.0" text-anchor="end" fill="#222222">1e+02</text>
+<rect x="70.2" y="154.2" width="26.4" height="149.8" fill="#1b6ca8"><title>A Hit@1: 55.9</title></rect>
+<text x="83.4" y="151.2" text-anchor="middle" font-size="10" fill="#222222">55.9</text>
+<rect x="98.6" y="193.6" width="26.4" height="110.4" fill="#d95f02"><title>B Hit@1: 41.2</title></rect>
+<text x="111.8" y="190.6" text-anchor="middle" font-size="10" fill="#222222">41.2</text>
+<rect x="127.0" y="225.2" width="26.4" height="78.8" fill="#7570b3"><title>C Hit@1: 29.4</title></rect>
+<text x="140.2" y="222.2" text-anchor="middle" font-size="10" fill="#222222">29.4</text>
+<rect x="155.4" y="193.6" width="26.4" height="110.4" fill="#1b9e77"><title>D Hit@1: 41.2</title></rect>
+<text x="168.6" y="190.6" text-anchor="middle" font-size="10" fill="#222222">41.2</text>
+<text x="127.0" y="320" text-anchor="middle" fill="#222222">Hit@1</text>
+<rect x="212.2" y="114.8" width="26.4" height="189.2" fill="#1b6ca8"><title>A Hit@3: 70.6</title></rect>
+<text x="225.4" y="111.8" text-anchor="middle" font-size="10" fill="#222222">70.6</text>
+<rect x="240.6" y="91.2" width="26.4" height="212.8" fill="#d95f02"><title>B Hit@3: 79.4</title></rect>
+<text x="253.8" y="88.2" text-anchor="middle" font-size="10" fill="#222222">79.4</text>
+<rect x="269.0" y="122.7" width="26.4" height="181.3" fill="#7570b3"><title>C Hit@3: 67.6</title></rect>
+<text x="282.2" y="119.7" text-anchor="middle" font-size="10" fill="#222222">67.6</text>
+<rect x="297.4" y="106.9" width="26.4" height="197.1" fill="#1b9e77"><title>D Hit@3: 73.5</title></rect>
+<text x="310.6" y="103.9" text-anchor="middle" font-size="10" fill="#222222">73.5</text>
+<text x="269.0" y="320" text-anchor="middle" fill="#222222">Hit@3</text>
+<rect x="354.2" y="106.9" width="26.4" height="197.1" fill="#1b6ca8"><title>A Hit@5: 73.5</title></rect>
+<text x="367.4" y="103.9" text-anchor="middle" font-size="10" fill="#222222">73.5</text>
+<rect x="382.6" y="75.4" width="26.4" height="228.6" fill="#d95f02"><title>B Hit@5: 85.3</title></rect>
+<text x="395.8" y="72.4" text-anchor="middle" font-size="10" fill="#222222">85.3</text>
+<rect x="411.0" y="83.3" width="26.4" height="220.7" fill="#7570b3"><title>C Hit@5: 82.4</title></rect>
+<text x="424.2" y="80.3" text-anchor="middle" font-size="10" fill="#222222">82.4</text>
+<rect x="439.4" y="91.2" width="26.4" height="212.8" fill="#1b9e77"><title>D Hit@5: 79.4</title></rect>
+<text x="452.6" y="88.2" text-anchor="middle" font-size="10" fill="#222222">79.4</text>
+<text x="411.0" y="320" text-anchor="middle" fill="#222222">Hit@5</text>
+<rect x="496.2" y="91.2" width="26.4" height="212.8" fill="#1b6ca8"><title>A Hit@10: 79.4</title></rect>
+<text x="509.4" y="88.2" text-anchor="middle" font-size="10" fill="#222222">79.4</text>
+<rect x="524.6" y="67.5" width="26.4" height="236.5" fill="#d95f02"><title>B Hit@10: 88.2</title></rect>
+<text x="537.8" y="64.5" text-anchor="middle" font-size="10" fill="#222222">88.2</text>
+<rect x="553.0" y="83.3" width="26.4" height="220.7" fill="#7570b3"><title>C Hit@10: 82.4</title></rect>
+<text x="566.2" y="80.3" text-anchor="middle" font-size="10" fill="#222222">82.4</text>
+<rect x="581.4" y="83.3" width="26.4" height="220.7" fill="#1b9e77"><title>D Hit@10: 82.4</title></rect>
+<text x="594.6" y="80.3" text-anchor="middle" font-size="10" fill="#222222">82.4</text>
+<text x="553.0" y="320" text-anchor="middle" fill="#222222">Hit@10</text>
+<rect x="56" y="338" width="12" height="12" fill="#1b6ca8"/>
+<text x="72" y="348" fill="#222222">Arm A</text>
+<rect x="126" y="338" width="12" height="12" fill="#d95f02"/>
+<text x="142" y="348" fill="#222222">Arm B</text>
+<rect x="196" y="338" width="12" height="12" fill="#7570b3"/>
+<text x="212" y="348" fill="#222222">Arm C</text>
+<rect x="266" y="338" width="12" height="12" fill="#1b9e77"/>
+<text x="282" y="348" fill="#222222">Arm D</text>
+<text transform="translate(14 170.0) rotate(-90)" text-anchor="middle" fill="#222222">% of questions</text>
+</svg>

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="218" viewBox="0 0 640 218" font-family="sans-serif" font-size="12">
+<title>Paired Hit@5 difference, X minus Y (percentage points, bootstrap 95% CI)</title>
+<rect width="640" height="218" fill="#ffffff"/>
+<text x="320.0" y="18" text-anchor="middle" font-size="14" fill="#222222">Paired Hit@5 difference, X minus Y (percentage points, bootstrap 95% CI)</text>
+<line x1="354.6" y1="34" x2="354.6" y2="170" stroke="#222222" stroke-dasharray="4 3"/>
+<text x="162" y="57.0" text-anchor="end" fill="#222222">B-A Hit@5</text>
+<line x1="354.6" y1="53.0" x2="585.2" y2="53.0" stroke="#222222" stroke-width="2"/>
+<circle cx="457.1" cy="53.0" r="4.5" fill="#d95f02"><title>B-A Hit@5: +11.76 [+0.00, +26.47]</title></circle>
+<text x="616" y="57.0" text-anchor="end" font-size="10" fill="#222222">+11.8 [+0.0, +26.5]</text>
+<text x="162" y="83.0" text-anchor="end" fill="#222222">B-C Hit@5</text>
+<line x1="277.7" y1="79.0" x2="482.7" y2="79.0" stroke="#222222" stroke-width="2"/>
+<circle cx="380.2" cy="79.0" r="4.5" fill="#d95f02"><title>B-C Hit@5: +2.94 [-8.82, +14.71]</title></circle>
+<text x="616" y="83.0" text-anchor="end" font-size="10" fill="#222222">+2.9 [-8.8, +14.7]</text>
+<text x="162" y="109.0" text-anchor="end" fill="#222222">C-A Hit@5</text>
+<line x1="328.9" y1="105.0" x2="534.0" y2="105.0" stroke="#222222" stroke-width="2"/>
+<circle cx="431.4" cy="105.0" r="4.5" fill="#d95f02"><title>C-A Hit@5: +8.82 [-2.94, +20.59]</title></circle>
+<text x="616" y="109.0" text-anchor="end" font-size="10" fill="#222222">+8.8 [-2.9, +20.6]</text>
+<text x="162" y="135.0" text-anchor="end" fill="#222222">D-A Hit@5</text>
+<line x1="354.6" y1="131.0" x2="482.7" y2="131.0" stroke="#222222" stroke-width="2"/>
+<circle cx="405.8" cy="131.0" r="4.5" fill="#d95f02"><title>D-A Hit@5: +5.88 [+0.00, +14.71]</title></circle>
+<text x="616" y="135.0" text-anchor="end" font-size="10" fill="#222222">+5.9 [+0.0, +14.7]</text>
+<text x="162" y="161.0" text-anchor="end" fill="#222222">D-B Hit@5</text>
+<line x1="200.8" y1="157.0" x2="405.8" y2="157.0" stroke="#222222" stroke-width="2"/>
+<circle cx="303.3" cy="157.0" r="4.5" fill="#d95f02"><title>D-B Hit@5: -5.88 [-17.65, +5.88]</title></circle>
+<text x="616" y="161.0" text-anchor="end" font-size="10" fill="#222222">-5.9 [-17.6, +5.9]</text>
+<text x="393.0" y="208" text-anchor="middle" fill="#222222">percentage points (1 question = 2.94)</text>
+</svg>

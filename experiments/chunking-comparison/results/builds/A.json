@@ -1,0 +1,60 @@
+{
+  "accepted_files": 100,
+  "arm_id": "A",
+  "built_at_utc": "2026-11-24T17:28:49Z",
+  "bytes": {
+    "artifacts": {
+      "chunks.jsonl": 201650,
+      "index.faiss": 1299501,
+      "manifest.json": 1430
+    },
+    "directory_total": 1502581,
+    "index_total": 1502581
+  },
+  "chunk_count": 423,
+  "chunk_ids_sha256": "b3671c87d811ab8b6182839af642e4ccf2e642d53289b20036e2abbbc5beaeb5",
+  "chunker_params": {
+    "max_tokens": 512,
+    "overlap_lines": 10,
+    "size_lines": 60
+  },
+  "dimension": 768,
+  "embedding_mode": "resumable-cache",
+  "embedding_model": "jinaai/jina-embeddings-v2-base-code",
+  "environment": {
+    "cpu_count": 2,
+    "git_head": "b64da49dda7925ff098c74e778d4354da9fcf3bd",
+    "machine": "x86_64",
+    "memory_bytes": 4105613312,
+    "packages": {
+      "faiss-cpu": "1.15.1",
+      "fastembed": "0.8.0",
+      "numpy": "2.5.3",
+      "onnxruntime": "1.30.0",
+      "pydantic": "2.13.5",
+      "tokenizers": "0.23.2"
+    },
+    "platform": "Linux-6.8.0-149-generic-x86_64-with-glibc2.35",
+    "processor": "x86_64",
+    "python": "3.12.14"
+  },
+  "index_id": "4aaeab9c650ab76c",
+  "index_path": "A/4aaeab9c650ab76c",
+  "index_type": "IndexFlatIP",
+  "label": "baseline line windows (production)",
+  "model_cold_start_seconds": 7.46482846300205,
+  "repository_fingerprint": "e7709ab39fff91d4c91369455a0c6e05b31c8107f4cb87918107c8f863fd1008",
+  "representation_version": 1,
+  "seconds": {
+    "chunk": 0.09830229999715812,
+    "embed": 1059.9620114340141,
+    "embed_wall_final_call": 101.2995545690028,
+    "index_and_save": 0.3936250429978827,
+    "ingest": 2.521667190001608,
+    "total": 1062.9756059670108
+  },
+  "strategy": "line",
+  "strategy_version": 1,
+  "text_style": "prefixed",
+  "vector_count": 423
+}
