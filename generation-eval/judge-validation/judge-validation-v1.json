@@ -1,0 +1,86 @@
+{
+  "schema": "judge-validation/1",
+  "version": "judge-validation-v1",
+  "declared": "Milestone 11B, committed BEFORE any local or hosted judge execution on the pilot or on the synthetic controls. The thresholds are project-specific engineering thresholds chosen for a small academic experiment; they are not literature standards, they are not statistically derived, and they must not be changed after any result has been seen. A change requires a new version (judge-validation-v2) with its own commit, and every earlier result stays labelled with the version it was judged under.",
+  "judge": {
+    "provider": "ollama",
+    "model": "llama3.1:8b",
+    "quantization": "Q4_K_M",
+    "context_size": 8192,
+    "max_output_tokens": 1024,
+    "temperature": 0.0,
+    "seed": 20260,
+    "structured_output": "json",
+    "judge_prompt_version": "gen-judge-2",
+    "rubric_version": "gen-rubric-1"
+  },
+  "controls": {
+    "specification": "generation-eval/judge-controls/controls-v1.json",
+    "model_controls_expected": 18,
+    "purpose": "Synthetic answers with expected verdicts written by the project team independently of the judge. They test whether the judge can tell correct, partial, fabricated, contradicted and abstaining answers apart. They are never part of the benchmark and never enter primary or pilot metrics."
+  },
+  "technical_acceptance": {
+    "T1_pilot_judgements_parse": {
+      "rule": "Every pilot answer that has model text has a successful judgement (state judged). A failed, skipped or missing judgement for such an answer is a failure.",
+      "required_fraction": 1.0
+    },
+    "T2_control_parse_success": {
+      "rule": "Fraction of the first-pass model controls whose judge output parsed into a valid assessment.",
+      "min_fraction": 0.95,
+      "denominator": "the 18 first-pass model controls (the parser and security controls are excluded); 0.95 of 18 rounds up, so every one of the 18 must parse"
+    },
+    "T3_no_accepted_context_overflow_or_truncation": {
+      "rule": "No successful judgement record may show prompt tokens at or above the input budget (context_size - max_output_tokens), prompt plus completion tokens at or above context_size, or completion tokens at or above max_output_tokens. Requests the client refused for these reasons are recorded as failed and are counted separately; they are correct refusals, not acceptances.",
+      "max_violations": 0
+    },
+    "T4_no_security_bypass": {
+      "rule": "The security control (an answer carrying a synthetic planted secret, assembled at run time and never stored in the repository) must end as a failed record naming the secret gate, and no judgement record anywhere in the validation artifacts may contain that secret.",
+      "max_violations": 0
+    },
+    "T5_valid_runtime_fingerprint": {
+      "rule": "Every judgement file and control result carries a 64-character hexadecimal runtime fingerprint and a runtime description whose provider, model, quantization, context size, seed, temperature, output budget and structured-output mode equal the values in the judge section above, and all artifacts of the validation share one fingerprint.",
+      "max_violations": 0
+    },
+    "T6_cache_isolation_and_resume": {
+      "rule": "The repeat pass used no cache (zero cache hits), its artifacts live in a directory different from the first pass, and both passes share the runtime fingerprint. Resume refusal on a changed runtime is established by the offline test suite (tests/unit/test_judge_runtime_identity.py, tests/unit/test_judge_cli.py), not by this evaluation.",
+      "max_violations": 0
+    }
+  },
+  "semantic_pilot_acceptance": {
+    "S1_human_exact_agreement": {
+      "rule": "Exact agreement of the judge's 0-2 correctness score with the blinded human rating on the pilot answers.",
+      "min_fraction": 0.75,
+      "expected_answers": 8,
+      "if_fewer_answers": "A RAG system abstention has no model text and is rule-scored, so fewer than 8 answers can be eligible. The criterion is then evaluated on the answers available and the actual n is reported; with fewer than 4 rated answers it is reported as inconclusive, never as a pass."
+    },
+    "S2_no_two_point_disagreement": {
+      "rule": "Number of pilot answers where the judge and the human differ by two points on the 0-2 correctness score.",
+      "max_count": 0
+    },
+    "S3_fabricated_negative_controls": {
+      "rule": "Every control of these kinds must receive correctness score 0.",
+      "kinds": ["confident_fabrication", "contradicted_fact", "invented_symbol"],
+      "required_fraction": 1.0
+    },
+    "S4_abstention_discrimination": {
+      "rule": "Every correct_abstention control must be judged as abstaining with score 2, and every incorrect_refusal control as abstaining with score 0.",
+      "required_fraction": 1.0
+    },
+    "S5_repeat_consistency": {
+      "rule": "Fraction of items (the pilot answers plus the first-pass model controls) whose correctness score is identical in two independent passes. The second pass bypasses the cache and unloads the model between requests. An item that is not validly judged in both passes counts as inconsistent.",
+      "min_fraction": 0.95
+    }
+  },
+  "primary_audit_acceptance": {
+    "rule": "Evaluated once on the primary human audit (judge-vs-human agreement on the correctness score), never on the pilot.",
+    "exact_agreement_min": 0.75,
+    "weighted_kappa_min": 0.60,
+    "kappa_kind": "quadratic-weighted Cohen's kappa on the 0-2 correctness score, as reported by audit-agree",
+    "severe_two_point_disagreement_max_fraction": 0.05,
+    "valid_judgement_coverage_min": 0.95,
+    "report": ["sample sizes", "denominators", "exclusions", "uncertainty"],
+    "undefined_kappa": "A kappa that is undefined (null) is NOT a pass: the criterion is reported as not met.",
+    "on_failure": "Label every conclusion that depends on the local judge exploratory and recommend further human verification before relying on it."
+  },
+  "interpretation": "Passing the technical and semantic pilot criteria shows that the local judge runs safely and reproducibly and behaves sensibly on a very small set; it does not validate the judge for the primary experiment. Only the primary audit criteria do that, and only for that audit sample."
+}
