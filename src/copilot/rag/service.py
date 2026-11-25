@@ -49,27 +49,38 @@ class SupportsRetrieve(Protocol):
     def retrieve(self, query: str, top_k: int | None = None) -> list[RetrievalResult]: ...
 
 
-def answer_plain(question: str, llm: LLMClient, *, settings: Settings | None = None) -> PlainAnswer:
+def answer_plain(
+    question: str,
+    llm: LLMClient,
+    *,
+    settings: Settings | None = None,
+    system_prompt: str = PLAIN_SYSTEM_PROMPT,
+    prompt_version: str = PLAIN_PROMPT_VERSION,
+) -> PlainAnswer:
     """The plain baseline: the question goes to the LLM with no repository context.
 
     The outbound text is scanned by the secret gate inside ``GuardedLLMClient`` before the
     provider is called. There is no repository grounding: answers about a specific repository
     come from the model's general knowledge (and may be invented).
+
+    ``system_prompt`` / ``prompt_version`` default to plain-v1. The Milestone 11 comparison passes
+    ``PLAIN_SYSTEM_PROMPT_V2`` / ``PLAIN_PROMPT_VERSION_V2``; the version string is always recorded
+    with the answer so two prompts can never be confused.
     """
     settings = settings or get_settings()
     text = validate_query(question)
     request = LLMRequest(
-        system_instruction=PLAIN_SYSTEM_PROMPT,
+        system_instruction=system_prompt,
         user_prompt=build_plain_user_prompt(text),
         temperature=settings.llm_temperature,
         max_output_tokens=settings.llm_max_output_tokens,
-        prompt_version=PLAIN_PROMPT_VERSION,
+        prompt_version=prompt_version,
     )
     response = GuardedLLMClient(llm).generate(request)
     return PlainAnswer(
         question=text,
         answer=response.text,
-        prompt_version=PLAIN_PROMPT_VERSION,
+        prompt_version=prompt_version,
         generation=GenerationInfo.from_response(response),
     )
 

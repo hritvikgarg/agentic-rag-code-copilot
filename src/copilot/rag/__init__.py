@@ -8,7 +8,9 @@ from copilot.rag.context import BuiltContext, DroppedEvidence, build_context, fo
 from copilot.rag.models import AnswerStatus, GenerationInfo, PlainAnswer, RagAnswer
 from copilot.rag.prompts import (
     PLAIN_PROMPT_VERSION,
+    PLAIN_PROMPT_VERSION_V2,
     PLAIN_SYSTEM_PROMPT,
+    PLAIN_SYSTEM_PROMPT_V2,
     RAG_PROMPT_VERSION,
     RAG_SYSTEM_PROMPT,
 )
@@ -16,7 +18,9 @@ from copilot.rag.service import RagService, SupportsRetrieve, answer_plain, answ
 
 __all__ = [
     "PLAIN_PROMPT_VERSION",
+    "PLAIN_PROMPT_VERSION_V2",
     "PLAIN_SYSTEM_PROMPT",
+    "PLAIN_SYSTEM_PROMPT_V2",
     "RAG_PROMPT_VERSION",
     "RAG_SYSTEM_PROMPT",
     "AnswerStatus",
