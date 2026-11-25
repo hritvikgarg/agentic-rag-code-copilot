@@ -103,7 +103,7 @@ agentic-rag-code-copilot/
 │   ├── rag/                # IMPLEMENTED: plain baseline, context, citations, RagService, CLI
 │   ├── agents/             # IMPLEMENTED: LangGraph agentic RAG workflow (Milestone 8)
 │   ├── services/           # IMPLEMENTED: CopilotService and presentation helpers for the UI
-│   ├── parsing/            # placeholder (unused): the AST logic lives in chunking/ast_chunker.py
+│   ├── parsing/            # Python traceback parser (M12 S1, docs/traceback-parser.md)
 ├── ui/                     # IMPLEMENTED: Streamlit app (streamlit_app.py)
 ├── benchmarks/             # the repository-question benchmark used by the evaluation commands
 ├── tests/                  # unit/ integration/ security/ + fixtures/ (synthetic repository builder)
