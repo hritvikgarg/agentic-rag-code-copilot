@@ -8,7 +8,7 @@
 * ``run``            generate answers (hosted model; requires ``--confirm-model PROVIDER/MODEL``).
 * ``judge``          judge a run's answers (hosted judge model).
 * ``report``         analysis from run and judgement files (offline).
-* ``audit-worksheet`` / ``audit-agree``  the human audit (offline).
+* ``audit-worksheet`` / ``audit-agree`` / ``audit-rule-check``  the human audit (offline).
 
 Only ``run`` and ``judge`` can contact a provider; both refuse to start unless the model has been
 confirmed on the command line, and both go through the secret gate. Output contains repository
@@ -32,10 +32,20 @@ from copilot.evaluation.generation.analysis import RepoInputs, build_report, ren
 from copilot.evaluation.generation.audit import (
     AuditAnswer,
     AuditUnit,
-    agreement,
     build_worksheet,
-    parse_human_row,
     sample_audit,
+)
+from copilot.evaluation.generation.audit_agree import evaluate_agreement
+from copilot.evaluation.generation.audit_population import (
+    classify_questions,
+    describe_empty_sample,
+    finalization_problems,
+    population_report,
+)
+from copilot.evaluation.generation.audit_rules import (
+    build_rule_worksheet,
+    evaluate_rule_check,
+    rule_items,
 )
 from copilot.evaluation.generation.compat import check_historical_run, frozen_target
 from copilot.evaluation.generation.execution import (
@@ -67,7 +77,7 @@ from copilot.evaluation.generation.protocol import (
     protocol_hash,
 )
 from copilot.evaluation.generation.reference import build_reference
-from copilot.evaluation.generation.rubric import EvaluationError, score_assessment
+from copilot.evaluation.generation.rubric import EvaluationError
 from copilot.evaluation.generation.schema import (
     benchmark_digest,
     load_generation_benchmark,
@@ -412,23 +422,55 @@ def _cmd_report(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _paired_answers(inputs: Sequence[RepoInputs]):
-    """Questions both arms answered with text (a system abstention would reveal the arm)."""
+    """Questions both arms answered with model text (a system abstention is verified separately)."""
     for item in inputs:
         for entry in item.run.entries:
             if entry.plain.has_text and entry.rag.has_text:
                 yield item, entry
 
 
+def _suffix(inputs: Sequence[RepoInputs], provisional: bool) -> str:
+    return ("-PROVISIONAL" if provisional else "") + (
+        "-TEST-ARTIFACT" if any(i.run.test_artifact for i in inputs) else ""
+    )
+
+
+def _resolved_for_audit(args: argparse.Namespace, root: Path, out_dir: Path):
+    stored = load_protocol(root / args.protocol)
+    first = load_run(run_path(out_dir, _selected(stored, args.repository)[0].repository_id))
+    return stored.with_model(first.llm_provider, first.llm_model)
+
+
 def _cmd_audit_worksheet(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.root)
     out_dir = root / args.output_dir
-    stored = load_protocol(root / args.protocol)
-    first = load_run(run_path(out_dir, _selected(stored, args.repository)[0].repository_id))
-    protocol = stored.with_model(first.llm_provider, first.llm_model)
+    protocol = _resolved_for_audit(args, root, out_dir)
     inputs, _ = _repo_inputs(protocol, root, out_dir, settings, args.repository)
-    paired = list(_paired_answers(inputs))
+    statuses = classify_questions(inputs)
+    problems = finalization_problems(inputs)
+    provisional = bool(problems)
+    if provisional and not args.provisional:
+        print(
+            f"error: the experiment is not finalized ({len(problems)} problem(s)); an official "
+            "audit sample may only be drawn after generation and judging are complete. First "
+            f"problem: {problems[0]}. Re-run with --provisional for a development-only sample.",
+            file=sys.stderr,
+        )
+        return 2
+    suffix = _suffix(inputs, provisional)
+    label = "PROVISIONAL (development only)" if provisional else None
+    eligible = {(s.repository_id, s.question_id) for s in statuses if s.eligible}
+    paired = [(i, e) for i, e in _paired_answers(inputs)
+              if (i.run.repository_id, e.question_id) in eligible]  # fmt: skip
     units = [AuditUnit(i.run.repository_id, e.question_id, e.answerable) for i, e in paired]
     sample = sample_audit(units, fraction=protocol.audit_fraction, seed=protocol.audit_seed)
+    report = population_report(inputs, statuses, sample, problems=problems, provisional=provisional)
+    write_text_atomically(
+        out_dir / f"audit-population{suffix}.json", json.dumps(report, indent=2) + "\n"
+    )
+    if not sample:
+        print(f"error: {describe_empty_sample(report)}", file=sys.stderr)
+        return 2  # never an empty worksheet reported as a success
     chosen = {(u.repository_id, u.question_id) for u in sample}
     answers, questions, references = [], {}, {}
     for item, entry in paired:
@@ -442,67 +484,78 @@ def _cmd_audit_worksheet(args: argparse.Namespace, settings: Settings) -> int:
         references[key] = build_reference(question, files)
         for arm in ("plain", "rag"):
             answers.append(AuditAnswer(key[0], key[1], arm, getattr(entry, arm).answer or ""))
-    sheet = build_worksheet(answers, questions, references, seed=protocol.audit_seed)
-    suffix = "-TEST-ARTIFACT" if any(i.run.test_artifact for i in inputs) else ""
+    sheet = build_worksheet(
+        answers, questions, references, seed=protocol.audit_seed, status_label=label
+    )
     write_text_atomically(out_dir / f"audit-worksheet{suffix}.csv", sheet.to_csv())
     write_text_atomically(out_dir / f"audit-key{suffix}.json", sheet.key_json())
-    print(f"sampled {len(chosen)} of {len(units)} paired questions ({len(answers)} answers); "
-          f"the key is audit-key{suffix}.json - do not open it while rating")  # fmt: skip
+    rule_csv, rule_key, rule_sampled = build_rule_worksheet(
+        rule_items(inputs), fraction=protocol.audit_fraction, seed=protocol.audit_seed,
+        status_label=label,
+    )  # fmt: skip
+    if rule_sampled:
+        write_text_atomically(out_dir / f"audit-rule-worksheet{suffix}.csv", rule_csv)
+        write_text_atomically(out_dir / f"audit-rule-key{suffix}.json", rule_key)
+    total = report["total_benchmark_questions"]
+    print(
+        f"{'PROVISIONAL ' if provisional else ''}audit sample: {len(chosen)} question(s) "
+        f"({len(answers)} answers) = {len(chosen) / len(eligible):.0%} of {len(eligible)} eligible "
+        f"pair(s) and {len(chosen) / total:.0%} of {total} benchmark question(s); "
+        f"{report['excluded_pairs']} excluded; population report: audit-population{suffix}.json"
+    )
+    print(
+        f"rule-scored system abstentions: {report['rule_scored_system_abstentions']} "
+        f"({len(rule_sampled)} sampled for verification in audit-rule-worksheet{suffix}.csv)"
+    )
+    print(f"the key is audit-key{suffix}.json - do not open it while rating")
     return 0
+
+
+def _read_csv(path: str) -> list[dict[str, str]]:
+    return list(csv.DictReader(io.StringIO(Path(path).read_text(encoding="utf-8"))))
 
 
 def _cmd_audit_agree(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.root)
     out_dir = root / args.output_dir
-    stored = load_protocol(root / args.protocol)
-    first = load_run(run_path(out_dir, _selected(stored, args.repository)[0].repository_id))
-    protocol = stored.with_model(first.llm_provider, first.llm_model)
-    key = {e["item_id"]: e for e in json.loads(Path(args.key).read_text(encoding="utf-8"))}
-    rows = list(csv.DictReader(io.StringIO(Path(args.worksheet).read_text(encoding="utf-8"))))
-    human_scores, judge_scores, human_abs, judge_abs, human_facts, judge_facts = (
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-    )
-    rated = 0
+    protocol = _resolved_for_audit(args, root, out_dir)
+    key = json.loads(Path(args.key).read_text(encoding="utf-8"))
+    rows = _read_csv(args.worksheet)
+    questions: dict[str, dict] = {}
+    judged: dict[str, dict] = {}
     for spec in _selected(protocol, args.repository):
         bench, _ = _check_benchmark(spec, root, settings)
-        questions = {q.id: q for q in bench.questions}
-        judged = load_judgements(judgement_path(out_dir, spec.repository_id)).by_key()
-        for row in rows:
-            entry = key.get(row["item_id"])
-            if entry is None or entry["repository_id"] != spec.repository_id:
-                continue
-            question = questions[entry["question_id"]]
-            human = parse_human_row(row, [f.id for f in question.key_facts], args.rater)
-            machine = judged.get((question.id, entry["arm"]))
-            if human is None or machine is None or machine.assessment is None:
-                continue
-            rated += 1
-            human_scores.append(score_assessment(question, human).score)
-            judge_scores.append(score_assessment(question, machine.assessment).score)
-            human_abs.append(human.abstained)
-            judge_abs.append(machine.assessment.abstained)
-            for fid, verdict in human.fact_verdicts.items():
-                human_facts.append(verdict.value == "supported")
-                judge_facts.append(machine.assessment.fact_verdicts[fid].value == "supported")
-    if rated == 0:
-        print("no rated rows were found in the worksheet", file=sys.stderr)
-        return 2
-    result = {
-        "rated_answers": rated,
-        "correctness_score_0_2": agreement(human_scores, judge_scores, ordinal=True).to_json(),
-        "abstained": agreement(human_abs, judge_abs).to_json(),
-        "key_fact_supported": agreement(human_facts, judge_facts).to_json(),
-        "note": "kappa is null when a rater never varies (undefined); raw agreement is given",
-    }
+        questions[spec.repository_id] = {q.id: q for q in bench.questions}
+        judged[spec.repository_id] = load_judgements(
+            judgement_path(out_dir, spec.repository_id)
+        ).by_key()
+    result = evaluate_agreement(rows, key, questions, judged, rater=args.rater)
     path = out_dir / "audit-agreement.json"
     write_text_atomically(path, json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
+    if not result["rows_accounted_for"]:
+        print("error: invalid, duplicate, unexpected or missing worksheet rows (see the report)",
+              file=sys.stderr)  # fmt: skip
+        return 3
+    if result["rated_answers"] == 0:
+        print("error: no eligible rated rows (a human rating and a valid judge rating)",
+              file=sys.stderr)  # fmt: skip
+        return 2
     return 0
+
+
+def _cmd_audit_rule_check(args: argparse.Namespace, settings: Settings) -> int:
+    root = Path(args.root)
+    out_dir = root / args.output_dir
+    key = json.loads(Path(args.key).read_text(encoding="utf-8"))
+    result = evaluate_rule_check(_read_csv(args.worksheet), key)
+    write_text_atomically(out_dir / "audit-rule-check.json", json.dumps(result, indent=2) + "\n")
+    print(json.dumps(result, indent=2))
+    problems = (
+        result["invalid_ratings"] or result["duplicate_item_ids"] or result["unexpected_item_ids"]
+        or result["key_items_missing_from_worksheet"]
+    )  # fmt: skip
+    return 3 if problems else (2 if result["rated"] == 0 else 0)
 
 
 # --------------------------------------------------------------------------- entry point
@@ -553,11 +606,23 @@ def _parser() -> argparse.ArgumentParser:
     worksheet = sub.add_parser("audit-worksheet", help="sample and write the blinded worksheet")
     common(worksheet)
 
+    worksheet.add_argument(
+        "--provisional", action="store_true",
+        help="allow a development-only sample from an unfinished experiment",
+    )  # fmt: skip
+
     agree = sub.add_parser("audit-agree", help="agreement between a filled worksheet and the judge")
     common(agree)
     agree.add_argument("--worksheet", required=True)
     agree.add_argument("--key", required=True)
     agree.add_argument("--rater", default="rater-1")
+
+    rules = sub.add_parser(
+        "audit-rule-check", help="verify the rule-scored system abstentions (not judge agreement)"
+    )
+    common(rules)
+    rules.add_argument("--worksheet", required=True)
+    rules.add_argument("--key", required=True)
     return parser
 
 
@@ -573,6 +638,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "report": _cmd_report,
         "audit-worksheet": _cmd_audit_worksheet,
         "audit-agree": _cmd_audit_agree,
+        "audit-rule-check": _cmd_audit_rule_check,
     }
     try:
         return commands[args.command](args, settings)

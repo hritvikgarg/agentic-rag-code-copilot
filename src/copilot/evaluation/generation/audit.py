@@ -121,8 +121,13 @@ def build_worksheet(
     references: Mapping[tuple[str, str], ReferenceMaterial],
     *,
     seed: int,
+    status_label: str | None = None,
 ) -> Worksheet:
-    """A blinded, shuffled worksheet with empty human fields and a separate key."""
+    """A blinded, shuffled worksheet with empty human fields and a separate key.
+
+    ``status_label`` (for example ``PROVISIONAL``) is written into every row so a worksheet cannot
+    be mistaken for the official one once it has left the output directory.
+    """
     order = sorted(answers, key=lambda a: (a.repository_id, a.question_id, a.arm))
     random.Random(f"worksheet|{seed}").shuffle(order)
     rows: list[dict[str, object]] = []
@@ -140,6 +145,7 @@ def build_worksheet(
             evidence = f"Appropriate answer: {ref.expected_abstention}"
         row: dict[str, object] = {
             "item_id": item_id,
+            **({"audit_status": status_label} if status_label else {}),
             "repository_id": item.repository_id,
             "question": questions[(item.repository_id, item.question_id)],
             "reference_key_facts": facts,
@@ -246,6 +252,16 @@ def weighted_kappa(
     return 1 - obs_disagreement / exp_disagreement
 
 
+def kappa_undefined_reason(n: int) -> str:
+    """Why a kappa is ``None`` (reported next to the null, never left unexplained)."""
+    if n == 0:
+        return "no eligible rated pairs"
+    return (
+        "undefined: a rater used a single category for every item (or the two raters' marginals "
+        "leave no variation), so chance agreement is 1; raw agreement is still reported"
+    )
+
+
 @dataclass(frozen=True)
 class AgreementResult:
     n: int
@@ -254,12 +270,15 @@ class AgreementResult:
     kind: str
 
     def to_json(self) -> dict[str, object]:
-        return {
+        data: dict[str, object] = {
             "n": self.n,
             "raw_agreement": self.raw,
             "kappa": self.kappa,
             "kappa_kind": self.kind,
         }
+        if self.kappa is None:
+            data["kappa_undefined_reason"] = kappa_undefined_reason(self.n)
+        return data
 
 
 def agreement(
