@@ -38,7 +38,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -57,6 +57,7 @@ from copilot.evaluation.generation.schema import GenerationQuestion
 from copilot.llm import LLMClient, LLMError, LLMRequest
 from copilot.llm.guarded import GuardedLLMClient
 from copilot.llm.retry import DEFAULT_RETRY_POLICY, RetryPolicy, call_with_retry
+from copilot.llm.runtime import RuntimeIdentity
 from copilot.security import RepositorySecretRiskError, assert_safe_for_external_llm
 from copilot.utils.atomic_file import write_text_atomically
 
@@ -214,12 +215,26 @@ class JudgeRecord(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     reasoning_tokens: int | None = None
+    # Local-model runtime fingerprint (``RuntimeIdentity.fingerprint``); None for hosted judges.
+    runtime_fingerprint: str | None = None
 
 
 def judge_cache_key(
-    *, provider: str, model: str, temperature: float, max_output_tokens: int, input_sha256: str
+    *,
+    provider: str,
+    model: str,
+    temperature: float,
+    max_output_tokens: int,
+    input_sha256: str,
+    runtime_fingerprint: str | None = None,
 ) -> str:
-    """Identity of one judge call: judge, settings, prompt and rubric versions, and the input."""
+    """Identity of one judge call: judge, settings, prompt and rubric versions, and the input.
+
+    ``runtime_fingerprint`` identifies a *local* runtime (model digest, quantisation, server
+    version, context size, seed, ...). It is added to the hashed payload only when it is given, so
+    every hosted-judge (Gemini) key is byte-for-byte what it was before local judges existed
+    (``tests/unit/test_judge_runtime_identity.py`` freezes golden values).
+    """
     payload = {
         "provider": provider,
         "model": model,
@@ -229,6 +244,8 @@ def judge_cache_key(
         "rubric_version": RUBRIC_VERSION,
         "input_sha256": input_sha256,
     }
+    if runtime_fingerprint is not None:
+        payload["runtime_fingerprint"] = runtime_fingerprint
     text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -268,6 +285,23 @@ class LLMJudge:
     retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY
     retry_sleep: Callable[[float], None] | None = None
     cache: JudgeCache | None = None
+    _identity: RuntimeIdentity | None = field(default=None, init=False, repr=False)
+
+    def runtime_identity(self) -> RuntimeIdentity | None:
+        """Identity of a local judge runtime (a metadata call, read once); ``None`` when hosted.
+
+        Raises ``LLMError`` when a local runtime cannot be identified (server down, model not
+        installed, incomplete metadata) - an unidentified runtime must never judge or be cached.
+        """
+        if self._identity is None:
+            self._identity = GuardedLLMClient(self.llm).runtime_identity(
+                temperature=self.temperature, max_output_tokens=self.max_output_tokens
+            )
+        return self._identity
+
+    def runtime_fingerprint(self) -> str | None:
+        identity = self.runtime_identity()
+        return identity.fingerprint() if identity is not None else None
 
     @property
     def evaluator_id(self) -> str:
@@ -296,13 +330,6 @@ class LLMJudge:
         for provider/parse problems (a bug in this module still raises)."""
         request = self.request_for(question, answer, reference)
         input_sha = hashlib.sha256(request.outbound_text().encode("utf-8")).hexdigest()
-        key = judge_cache_key(
-            provider=self.llm.provider,
-            model=self.llm.model,
-            temperature=self.temperature,
-            max_output_tokens=self.max_output_tokens,
-            input_sha256=input_sha,
-        )
         base = {
             "question_id": question.id,
             "blind_id": blind_id,
@@ -310,17 +337,33 @@ class LLMJudge:
             "judge_model": self.llm.model,
             "input_sha256": input_sha,
         }
-        # The secret gate runs BEFORE the cache lookup, so cached and uncached requests are held
-        # to the same policy (a stale or planted cache entry cannot be served for blocked input).
+        # The secret gate runs BEFORE the cache lookup (and before any provider call, including
+        # the runtime-identity metadata call), so cached and uncached requests are held to the same
+        # policy: a stale or planted cache entry cannot be served for blocked input.
         try:
             assert_safe_for_external_llm(request.scan_targets())
         except RepositorySecretRiskError as exc:
             return JudgeRecord(
                 state="failed", error=f"{type(exc).__name__}: {exc}"[:300], **base
             ), False
+        try:
+            fingerprint = self.runtime_fingerprint()
+        except LLMError as exc:  # an unidentified local runtime must neither judge nor cache
+            return JudgeRecord(
+                state="failed", error=f"{type(exc).__name__}: {exc}"[:300], **base
+            ), False
+        base["runtime_fingerprint"] = fingerprint
+        key = judge_cache_key(
+            provider=self.llm.provider,
+            model=self.llm.model,
+            temperature=self.temperature,
+            max_output_tokens=self.max_output_tokens,
+            input_sha256=input_sha,
+            runtime_fingerprint=fingerprint,
+        )
         if self.cache is not None:
             cached = self.cache.get(key)
-            if cached is not None:
+            if cached is not None and cached.runtime_fingerprint == fingerprint:
                 return cached.model_copy(update={"blind_id": blind_id}), True
         guarded = GuardedLLMClient(self.llm)
         sleep = self.retry_sleep

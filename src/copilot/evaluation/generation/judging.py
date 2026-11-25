@@ -10,8 +10,9 @@ are recorded as ``skipped`` with the reason; nothing is defaulted.
 A judge failure (provider error, blocked output, unparsable JSON, wrong fact ids) is recorded as a
 ``failed`` item and retried on the next resume. The file is checkpointed atomically after each item,
 so an interruption loses at most one judgement. Judge identity (provider, model, prompt and rubric
-versions) is stored; resuming with a different judge or rubric is refused, so two judges can never
-be mixed in one file.
+versions, and for a local judge its runtime fingerprint - model digest, quantisation, server
+version, context size, seed, ...) is stored; resuming with a different judge, runtime or rubric is
+refused, so two judges can never be mixed in one file.
 """
 
 from __future__ import annotations
@@ -73,6 +74,19 @@ class JudgementFile(BaseModel):
     same_model_as_generator: bool
     test_artifact: bool
     items: list[JudgedItem]
+    # Local-judge runtime identity (None for hosted judges, so older files load unchanged).
+    judge_runtime_fingerprint: str | None = None
+    judge_runtime: dict[str, object] | None = None
+
+    def context_failures(self) -> int:
+        """Failed items whose failure was a context/truncation refusal (never valid judgements)."""
+        return sum(
+            1
+            for i in self.items
+            if i.state == "failed"
+            and i.record is not None
+            and (i.record.error or "").startswith("LLMContextLimitError")
+        )
 
     def counts(self) -> dict[str, int]:
         out = {"judged": 0, "rule": 0, "failed": 0, "skipped": 0}
@@ -172,6 +186,8 @@ def judge_run(
 ) -> JudgementFile:
     """Judge every successful side of ``run``; reuse earlier successes; checkpoint every item."""
     judge_id = (judge.llm.provider, judge.llm.model)
+    identity = judge.runtime_identity()  # None for hosted judges; LLMError if unidentifiable
+    fingerprint = identity.fingerprint() if identity is not None else None
     if resume_from is not None:
         mismatches = [
             label
@@ -179,6 +195,11 @@ def judge_run(
                 ("protocol_hash", resume_from.protocol_hash, run.protocol_hash),
                 ("repository_id", resume_from.repository_id, run.repository_id),
                 ("judge", (resume_from.judge_provider, resume_from.judge_model), judge_id),
+                (
+                    "judge_runtime_fingerprint",
+                    resume_from.judge_runtime_fingerprint,
+                    fingerprint,
+                ),
                 ("judge_prompt_version", resume_from.judge_prompt_version, JUDGE_PROMPT_VERSION),
                 ("rubric_version", resume_from.rubric_version, RUBRIC_VERSION),
                 ("generation_model", resume_from.generation_model, run.llm_model),
@@ -206,6 +227,8 @@ def judge_run(
             judge_prompt_version=JUDGE_PROMPT_VERSION, rubric_version=RUBRIC_VERSION,
             same_model_as_generator=judge_id == (run.llm_provider, run.llm_model),
             test_artifact=run.test_artifact or judge.llm.provider == "fake", items=ordered,
+            judge_runtime_fingerprint=fingerprint,
+            judge_runtime=identity.model_dump(mode="json") if identity is not None else None,
         )  # fmt: skip
 
     streak = 0
