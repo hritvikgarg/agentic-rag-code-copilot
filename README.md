@@ -203,6 +203,13 @@ Directories still to be added when first needed: `scripts/`. Milestone 10 result
   subset of the benchmark, and `summarize` aggregates *manual* rubric ratings (correctness,
   citation correctness, hallucinated claims, completeness, abstention). The LLM is not used as a
   judge. No results exist yet. Plan and limits: [`docs/evaluation.md`](docs/evaluation.md).
+- **Answer-evaluation infrastructure** (`copilot.evaluation.generation`, Milestone 11A): a frozen
+  protocol, two generation benchmarks (the project and a new synthetic repository), a key-fact
+  correctness rubric, programmatic citation / hallucinated-reference / abstention checks, a blind
+  provider-neutral LLM judge, a human-audit worksheet with agreement statistics, a resumable
+  multi-repository runner and a paired bootstrap report. **Offline only so far: no hosted model has
+  been called and no answer-quality result exists.** Design, limits and the (not yet executed)
+  Milestone 11B commands: [`docs/generation-evaluation.md`](docs/generation-evaluation.md).
 - **Streamlit interface and service layer** (`ui/streamlit_app.py`, `copilot.services`, Milestones 7
   and 7.1): index a repository, ask questions, see the answer with literal-rendered file citations
   and retrieval statistics. Run: `uv sync --group ui` then `uv run --group ui streamlit run

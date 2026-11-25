@@ -122,7 +122,22 @@ def test_plan_is_offline_constructs_no_provider_and_writes_nothing(project, monk
     assert "demo: 4 questions (3 answerable, 1 unanswerable)" in out
     assert "generation calls <= 8" in out and "judge calls <= 8" in out
     assert "out/generation-demo.json" in out and "out/judgements-demo.json" in out
+    assert "index demo: idx (MISSING)" in out
     assert not (project / "out").exists()
+
+
+def test_run_refuses_an_index_that_is_not_the_one_frozen_in_the_protocol(
+    project, monkeypatch, capsys
+):
+    class Index:
+        index_id = "ffffffffffffffff"
+
+    wrong = FakeRetriever([make_result(CODE, rank=1, path="src/a.py", start=1, end=2)])
+    wrong.index = Index()
+    monkeypatch.setattr(cli, "open_retriever", lambda spec, root, settings: wrong)
+    argv = _args(project, "run", "--confirm-model", "fake/fake-model")
+    assert cli.main(argv) == 2
+    assert "re-frozen" in capsys.readouterr().err
 
 
 def test_run_refuses_without_a_confirmed_model_and_with_a_mismatched_one(project, capsys):

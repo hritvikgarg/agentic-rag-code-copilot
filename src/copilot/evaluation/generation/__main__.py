@@ -108,7 +108,8 @@ def _specs(root: Path) -> tuple[RepositorySpec, ...]:
     for bench_path, source_root, index_dir, index_id, independent in (
         (CopilotBench, "data/snapshots/a282ec471ebf1387cb4feafcfe732ad24a431c7a/tree",
          "data/indexes/4aaeab9c650ab76c", "4aaeab9c650ab76c", False),
-        (SyntheticBench, "generation-eval/repos/inventory-orders", None, None, False),
+        (SyntheticBench, "generation-eval/repos/inventory-orders",
+         "data/indexes/d115dc06e63659a2", "d115dc06e63659a2", False),
     ):  # fmt: skip
         bench = load_generation_benchmark(root / bench_path)
         meta = bench.meta
@@ -175,6 +176,12 @@ def _contexts(
                     "(see docs/generation-evaluation.md)"
                 )
             retriever = open_retriever(spec, root, settings)
+            actual = getattr(getattr(retriever, "index", None), "index_id", None)
+            if actual is not None and spec.index_id is not None and actual != spec.index_id:
+                raise RunMismatchError(
+                    f"{spec.repository_id}: the opened index is {actual}, the protocol expects "
+                    f"{spec.index_id}; the protocol must be re-frozen before generating"
+                )
         out.append(
             RepositoryContext(
                 spec, bench.questions, spec.benchmark_digest, retriever, spec.index_id
@@ -266,6 +273,12 @@ def _cmd_plan(args: argparse.Namespace, settings: Settings) -> int:
     )
     print(f"generation model: {model}  max_output_tokens: {protocol.max_output_tokens}  "
           f"temperature: {protocol.temperature}  top_k: {protocol.top_k}")  # fmt: skip
+    for ctx in contexts:
+        index_dir = ctx.spec.index_dir
+        present = index_dir is not None and (root / index_dir / "manifest.json").is_file()
+        print(
+            f"index {ctx.spec.repository_id}: {index_dir} ({'present' if present else 'MISSING'})"
+        )
     for line in plan.lines:
         print(
             f"- {line.repository_id}: {line.questions} questions ({line.answerable} answerable, "

@@ -63,8 +63,8 @@
       "benchmark_path": "generation-eval/benchmarks/inventory_orders_generation.jsonl",
       "benchmark_digest": "1a83110e682869fc36368cb8db42f4cd16d0d5993dbff9a01fb3d4e65a1b8153",
       "repository_fingerprint": "f633e7fef839f06900a8f751b77d2f93f409bb0adb39e4770e7ba4938d930522",
-      "index_dir": null,
-      "index_id": null,
+      "index_dir": "data/indexes/d115dc06e63659a2",
+      "index_id": "d115dc06e63659a2",
       "ignore_directories": [],
       "independent": false
     }
