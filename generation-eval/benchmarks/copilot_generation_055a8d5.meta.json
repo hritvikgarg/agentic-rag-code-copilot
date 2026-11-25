@@ -1,0 +1,24 @@
+{
+  "schema_version": "generation-benchmark/1",
+  "name": "copilot-generation-055a8d5",
+  "repository_id": "copilot",
+  "repository_name": "agentic-rag-code-copilot",
+  "source_kind": "existing-snapshot",
+  "repository_fingerprint": "e7709ab39fff91d4c91369455a0c6e05b31c8107f4cb87918107c8f863fd1008",
+  "commit": "055a8d5",
+  "ignore_directories": [
+    "data",
+    "tests",
+    "submission"
+  ],
+  "independent": false,
+  "description": "Generation benchmark for this project's own source code and documentation at commit 055a8d5 (snapshot data/snapshots/a282ec471ebf1387cb4feafcfe732ad24a431c7a/tree, reference index 4aaeab9c650ab76c). The 34 answerable questions reuse the exact text and ground-truth regions of retrieval benchmark copilot-self-055a8d5 and add source-supported key facts; 8 unanswerable questions test abstention. Key facts were written from the sealed region text only, without looking at any model response or any retrieval result.",
+  "contamination_notes": "The repository may be public and could be present in a model's training data, in which case the plain arm may answer from memorised code. The questions were written by the repository's author; the retrieval benchmark file (without key facts) is part of the snapshot. A plain-LLM advantage on this repository therefore cannot be separated from memorisation, and the synthetic repository exists to give an unfamiliar comparison.",
+  "limitations": [
+    "Not independent: the project author wrote the code, the questions and the key facts, so results are optimistic and cannot show generalisation.",
+    "34 answerable and 8 unanswerable questions: differences of a few questions are within noise.",
+    "Key facts are the author's reading of function-sized regions; an answer can be correct yet phrase facts differently, which is why grading is semantic (judge or human), not keyword matching.",
+    "Unanswerable questions are about operational or process facts that do not exist in the repository; they test abstention, not near-miss discrimination.",
+    "tests/, data/ and submission/ are excluded from the index, matching the retrieval benchmark."
+  ]
+}

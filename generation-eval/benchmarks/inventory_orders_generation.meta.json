@@ -1,0 +1,20 @@
+{
+  "schema_version": "generation-benchmark/1",
+  "name": "inventory-orders-generation",
+  "repository_id": "inventory-orders",
+  "repository_name": "inventory-orders",
+  "source_kind": "synthetic-authored",
+  "repository_fingerprint": "f633e7fef839f06900a8f751b77d2f93f409bb0adb39e4770e7ba4938d930522",
+  "commit": "1cb147d",
+  "ignore_directories": [],
+  "independent": false,
+  "description": "Generation benchmark for the newly authored synthetic Python project generation-eval/repos/inventory-orders (inventory and order management; 30 ingested files; frozen at commit 1cb147d before any question was written). 24 answerable questions across implementation, architecture, symbol lookup, cross-module behaviour, configuration, edge cases and documented limitations, plus 6 unanswerable questions. Key facts quote or paraphrase only the cited source text.",
+  "contamination_notes": "The repository was written for this study and has never been published, so a model cannot have seen it; this is its purpose. It is authored by the same project team as the benchmark and by an AI assistant, so its style may resemble code a model finds familiar, and its domain (inventory and orders) is a common textbook one.",
+  "limitations": [
+    "Synthetic: small (30 files), single-author, standard-library only and written to be clear; real repositories are larger, noisier and less consistent, so effects measured here may not transfer.",
+    "Not independent: the same team wrote the code, the questions and the key facts.",
+    "24 answerable and 6 unanswerable questions: differences of a few questions are within noise.",
+    "Many answers are visible in a single function, which favours retrieval of function-sized chunks.",
+    "Unanswerable questions concern external or operational facts that cannot be in the code; they test abstention, not near-miss discrimination."
+  ]
+}
