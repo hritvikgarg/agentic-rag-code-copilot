@@ -1,0 +1,161 @@
+{
+  "schema_version": "generation-protocol/1",
+  "name": "plain-vs-rag-primary-v1.1",
+  "arm_a": "plain LLM (plain-v2 prompt, no repository evidence)",
+  "arm_b": "repository-aware RAG (rag-v1 prompt, original line retriever, top-k 5)",
+  "plain_prompt_version": "plain-v2",
+  "rag_prompt_version": "rag-v1",
+  "prompt_digests": {
+    "plain-v1": "b506a7a90e9e61b8d51ecef68fda2fa406ae8106e76c4098fa9a9751672a494e",
+    "plain-v2": "ac411a779f81ae3fa26304620d2fceb88649bed935d2d33a1545367a27aeac56",
+    "rag-v1": "ec7e1fa7558537ed46a976febcd6e77706afc161e8366bf311feae7d96a0f34a"
+  },
+  "llm_provider": null,
+  "llm_model": null,
+  "temperature": 0.0,
+  "max_output_tokens": 8192,
+  "top_k": 5,
+  "retriever": {
+    "chunking_strategy": "line",
+    "chunk_params": {
+      "size_lines": 60,
+      "overlap_lines": 10,
+      "max_tokens": 512
+    },
+    "embedding_model_id": "jinaai/jina-embeddings-v2-base-code",
+    "text_style": "prefixed",
+    "index_type": "IndexFlatIP",
+    "embedding_normalized": true
+  },
+  "retriever_rationale": "The original line-window retriever (60 lines, 10 overlap, 512 tokens; Jina v2 base code, prefixed text, FAISS IndexFlatIP, top-k 5) is the one the project's earlier answers and the 8192-token historical run used. Milestones 5b and 10 compared retrieval variants on retrieval metrics; they did not establish that any variant yields better *answers*, so no superiority is claimed here and no variant was tuned on this benchmark. Using the original retriever also keeps the eight verified historical RAG responses comparable.",
+  "agentic_arm": "deferred (not part of this experiment)",
+  "held_equal": [
+    "generation model and provider",
+    "temperature 0",
+    "max_output_tokens",
+    "the question text (one field, sent verbatim to both arms)",
+    "the frozen repository snapshot"
+  ],
+  "prompt_fairness": "plain-v1 had no abstention or labelling instruction while rag-v1 does, which would confound the comparison; plain-v2 adds the same honesty rules (do not state repository specifics you cannot know, label repository evidence vs general knowledge, say explicitly when you cannot answer) without any evidence. Residual asymmetry: only RAG is told to cite [Source n]. plain-v1 and rag-v1 are unchanged and pinned by SHA-256.",
+  "repositories": [
+    {
+      "repository_id": "copilot",
+      "kind": "existing-snapshot",
+      "repository_name": "agentic-rag-code-copilot",
+      "source_root": "data/snapshots/a282ec471ebf1387cb4feafcfe732ad24a431c7a/tree",
+      "benchmark_path": "generation-eval/benchmarks/copilot_generation_055a8d5.jsonl",
+      "benchmark_digest": "c21ef79e6e32cd0b02b5fbdeb8919b8de5f1b96cd4869fbe838c3ba258ed43bd",
+      "repository_fingerprint": "e7709ab39fff91d4c91369455a0c6e05b31c8107f4cb87918107c8f863fd1008",
+      "index_dir": "data/indexes/4aaeab9c650ab76c",
+      "index_id": "4aaeab9c650ab76c",
+      "ignore_directories": [
+        "data",
+        "tests",
+        "submission"
+      ],
+      "independent": false
+    },
+    {
+      "repository_id": "inventory-orders",
+      "kind": "synthetic-authored",
+      "repository_name": "inventory-orders",
+      "source_root": "generation-eval/repos/inventory-orders",
+      "benchmark_path": "generation-eval/benchmarks/inventory_orders_generation.jsonl",
+      "benchmark_digest": "1a83110e682869fc36368cb8db42f4cd16d0d5993dbff9a01fb3d4e65a1b8153",
+      "repository_fingerprint": "f633e7fef839f06900a8f751b77d2f93f409bb0adb39e4770e7ba4938d930522",
+      "index_dir": "data/indexes/d115dc06e63659a2",
+      "index_id": "d115dc06e63659a2",
+      "ignore_directories": [],
+      "independent": false
+    }
+  ],
+  "primary_endpoint": {
+    "name": "paired difference in mean key-fact correctness (RAG - plain), answerable questions",
+    "definition": "For every answerable question both arms answered successfully and that were judged successfully, d = score(RAG) - score(plain) where score is the 0-2 key-fact correctness score of rubric gen-rubric-1. The estimate is the mean of d, with a percentile bootstrap 95% CI over questions (shared resample indices, fixed seed). Reported per repository and combined. Questions with a missing or failed side are listed and counted separately, never dropped silently and never imputed. A claim of improvement requires the CI to exclude 0; the synthetic and the self-referential repository are not pooled into a single headline without also showing each one."
+  },
+  "secondary_endpoints": [
+    {
+      "name": "groundedness",
+      "definition": "Judge groundedness grade 0-2, reported in two forms: overall (every scored response, including rule-scored system abstentions, which make no claims and receive 2 by convention) and over substantive generated answers (judge-scored, not abstaining). Denominators and the judge-scored/rule-scored split are reported; read it with correctness, completeness and the false-refusal rate - an abstention raises groundedness without being a better answer."
+    },
+    {
+      "name": "completeness",
+      "definition": "Fraction of key facts judged supported."
+    },
+    {
+      "name": "citation correctness",
+      "definition": "Programmatic: fraction of the answer's citations that resolve to a real file and line range (valid_fraction); applicable to RAG, and to plain answers only when they write explicit file:line locations. Never imputed for answers without citations."
+    },
+    {
+      "name": "hallucinated-reference indicators",
+      "definition": "Programmatic and conservative: count of repository files/symbols named in an answer that do not exist in the frozen repository (not_found), per answer; ambiguous/cannot-evaluate reported separately."
+    },
+    {
+      "name": "appropriate abstention",
+      "definition": "Unanswerable questions: share of responses classified insufficient_evidence. A generated response is classified from the judge's response_type (gen-judge-2), a system abstention by rule, and a response without a valid judge rating is 'unrated' (never classified by pattern matching). Cue-pattern labels are reported only as a diagnostic with their disagreements and concordance counts."
+    },
+    {
+      "name": "false refusal",
+      "definition": "Answerable questions: share of responses classified insufficient_evidence or generic_refusal (same classification and unrated handling as appropriate abstention)."
+    },
+    {
+      "name": "retrieval relevance",
+      "definition": "RAG only: whether a retrieved source overlaps a key-fact region (hit@k)."
+    },
+    {
+      "name": "latency",
+      "definition": "Wall-clock seconds of generated sides only (cache hits and reused historical responses are excluded and counted)."
+    },
+    {
+      "name": "tokens",
+      "definition": "Input, output and reasoning tokens reported by the provider (when reported)."
+    },
+    {
+      "name": "historical-response sensitivity",
+      "definition": "The primary endpoint repeated after excluding every question that has a reused historical response, reported next to the primary result with sample sizes, the number of excluded pairs and bootstrap intervals."
+    },
+    {
+      "name": "end-to-end reliability",
+      "definition": "Share of requested sides that ended successful / failed / not attempted."
+    }
+  ],
+  "judge": {
+    "prompt_version": "gen-judge-2",
+    "rubric_version": "gen-rubric-1",
+    "temperature": 0.0,
+    "max_output_tokens": 4096,
+    "note": "Blind to the arm; a different model family from the generator is recommended."
+  },
+  "audit_fraction": 0.2,
+  "audit_seed": 20260,
+  "bootstrap_resamples": 10000,
+  "bootstrap_seed": 11,
+  "confidence": 0.95,
+  "limitations": [
+    "The copilot repository was authored by the project team and its documentation is in the retrieval index: this arm measures retrieval-augmented use of a repository the model has probably never seen, but the question author knew the code (author bias).",
+    "The second repository is synthetic and written by the project team: it tests mechanics on unseen code, not performance on real-world independent software.",
+    "A single hosted model generates both arms; results do not transfer to other models.",
+    "The rubric judge is an LLM and is validated only through a human audit of a ~20% sample; judge self-preference toward the generator's model family is possible.",
+    "Plain-v2 receives the same honesty rules as RAG but cannot cite [Source n]; citation metrics are therefore RAG-only unless the plain answer writes explicit locations.",
+    "Reused historical responses came from a hosted model that may have drifted since they were produced, and their packed prompt was not recorded in full (only pinned prompt-template digests, the question, the index identity and the retrieved chunk ids); the historical sensitivity analysis shows the effect of excluding them."
+  ],
+  "amendment": {
+    "version": "1.1",
+    "amends_file": "generation-eval/protocol/primary-protocol.json",
+    "amends_file_sha256": "b6b63524af575d5bfbf2cf6f16298cc4613bb3e4e7463d0da05570ad87adc09f",
+    "made_before_any_real_generation": true,
+    "rationale": "The M11A acceptance review found that the abstention metrics, the groundedness secondary endpoint and the judge prompt did not measure what their names suggest (cue-pattern abstention labels disagree with the judge; rule-scored abstentions inflate groundedness). The changes are made before any real generation call, so no outcome influenced them. The original v1 file is preserved unchanged.",
+    "changes": [
+      "judge.prompt_version gen-judge-1 -> gen-judge-2 (adds the required closed response_type field; the rubric gen-rubric-1 and its scoring are unchanged)",
+      "secondary endpoints 'appropriate abstention' and 'false refusal': classification from the judge response_type / system rule, 'unrated' when no valid judge rating, cue patterns only as a diagnostic",
+      "secondary endpoint 'groundedness': overall and substantive-generated forms with denominators",
+      "new secondary endpoint 'historical-response sensitivity'",
+      "limitations: reused historical responses (possible hosted-model drift, incomplete packed-prompt provenance)",
+      "audit procedure (not hashed content): the official sample is drawn only after generation and judging are final, from eligible pairs, with the eligible and full-population fractions reported"
+    ],
+    "unchanged": [
+      "arms, prompts (plain-v2, rag-v1) and their pinned digests, retriever, top-k, temperature, max_output_tokens, repositories, benchmarks, key facts, rubric gen-rubric-1",
+      "the primary endpoint, its definition, the bootstrap settings and the audit fraction/seed"
+    ]
+  }
+}

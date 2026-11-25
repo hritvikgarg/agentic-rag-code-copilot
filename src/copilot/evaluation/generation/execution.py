@@ -135,6 +135,7 @@ class GenerationRun(BaseModel):
     plain_prompt_version: str
     rag_prompt_version: str
     test_artifact: bool = False
+    scope: str = "primary"  # "pilot" runs never resume into, or are analysed as, the primary run
     stop_reason: str | None = None
     entries: list[GenerationEntry]
 
@@ -285,6 +286,7 @@ class RepositoryContext:
     benchmark_digest: str
     retriever: SupportsRetrieve | None = None
     index_id: str | None = None
+    scope: str = "primary"  # "pilot" for the bounded pilot (a separate artifact namespace)
 
 
 def settings_for(protocol: PrimaryProtocol, base: Settings) -> Settings:
@@ -328,6 +330,7 @@ def check_resume_compatible(
     check("plain_prompt_version", existing.plain_prompt_version, protocol.plain_prompt_version)
     check("rag_prompt_version", existing.rag_prompt_version, protocol.rag_prompt_version)
     check("test_artifact", existing.test_artifact, is_test_provider(llm))
+    check("scope", existing.scope, ctx.scope)
     old_ids = {e.question_id for e in existing.entries}
     new_ids = {q.id for q in ctx.questions}
     if old_ids != new_ids:
@@ -560,7 +563,8 @@ def run_repository(
             max_output_tokens=protocol.max_output_tokens, top_k=protocol.top_k,
             plain_prompt_version=protocol.plain_prompt_version,
             rag_prompt_version=protocol.rag_prompt_version,
-            test_artifact=is_test_provider(llm), stop_reason=breaker.reason, entries=entries,
+            test_artifact=is_test_provider(llm), scope=ctx.scope, stop_reason=breaker.reason,
+            entries=entries,
         )  # fmt: skip
 
     def checkpoint() -> None:
@@ -638,7 +642,8 @@ def run_repositories(
                 temperature=protocol.temperature, max_output_tokens=protocol.max_output_tokens,
                 top_k=protocol.top_k, plain_prompt_version=protocol.plain_prompt_version,
                 rag_prompt_version=protocol.rag_prompt_version,
-                test_artifact=is_test_provider(llm), stop_reason=breaker.reason, entries=entries,
+                test_artifact=is_test_provider(llm), scope=ctx.scope, stop_reason=breaker.reason,
+                entries=entries,
             )  # fmt: skip
             write_run(run, path)
             runs[ctx.spec.repository_id] = run

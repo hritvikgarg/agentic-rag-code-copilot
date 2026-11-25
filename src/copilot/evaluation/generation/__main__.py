@@ -67,6 +67,18 @@ from copilot.evaluation.generation.judging import (
     judgement_path,
     load_judgements,
 )
+from copilot.evaluation.generation.pilot import (
+    DEFAULT_PILOT_OUTPUT_DIR,
+    PILOT_SPEC_PATH,
+    PilotMismatchError,
+    PilotSpec,
+    build_pilot_spec,
+    check_namespaces,
+    dump_pilot_spec,
+    load_pilot_spec,
+    restrict_context,
+    verify_pilot_spec,
+)
 from copilot.evaluation.generation.protocol import (
     PROTOCOL_PATH,
     PrimaryProtocol,
@@ -173,7 +185,7 @@ def _selected(protocol: PrimaryProtocol, names: Sequence[str]) -> tuple[Reposito
 
 def _contexts(
     protocol: PrimaryProtocol, root: Path, settings: Settings, names: Sequence[str],
-    *, with_retriever: bool,
+    *, with_retriever: bool, pilot: PilotSpec | None = None,
 ) -> list[RepositoryContext]:  # fmt: skip
     out: list[RepositoryContext] = []
     for spec in _selected(protocol, names):
@@ -192,12 +204,34 @@ def _contexts(
                     f"{spec.repository_id}: the opened index is {actual}, the protocol expects "
                     f"{spec.index_id}; the protocol must be re-frozen before generating"
                 )
-        out.append(
-            RepositoryContext(
-                spec, bench.questions, spec.benchmark_digest, retriever, spec.index_id
-            )
+        ctx = RepositoryContext(
+            spec, bench.questions, spec.benchmark_digest, retriever, spec.index_id
         )
+        out.append(restrict_context(ctx, pilot) if pilot is not None else ctx)
     return out
+
+
+def _pilot(args: argparse.Namespace, root: Path, stored: PrimaryProtocol) -> PilotSpec | None:
+    """The verified pilot specification for ``--pilot`` (else ``None``); checks the namespace."""
+    if not getattr(args, "pilot", False):
+        return None
+    check_namespaces(root / args.output_dir, root / DEFAULT_OUTPUT_DIR)
+    spec = load_pilot_spec(root / args.pilot_spec)
+    verify_pilot_spec(
+        spec,
+        protocol_hash(stored),
+        {r.repository_id: r.benchmark_digest for r in stored.repositories},
+    )
+    return spec
+
+
+def _expect_scope(run, pilot: PilotSpec | None, name: str) -> None:
+    expected = "pilot" if pilot is not None else "primary"
+    if run.scope != expected:
+        raise RunMismatchError(
+            f"{name}: this is a {run.scope!r} run but a {expected!r} run was requested; pilot and "
+            "primary artifacts are never mixed"
+        )
 
 
 def _resolved(protocol: PrimaryProtocol, confirm: str | None) -> PrimaryProtocol:
@@ -267,14 +301,55 @@ def _cmd_protocol_init(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def _cmd_pilot_init(args: argparse.Namespace, settings: Settings) -> int:
+    """Record the pilot questions (offline; reads only ids and answerability)."""
+    root = Path(args.root)
+    stored = load_protocol(root / args.protocol)
+    benchmarks, digests = {}, {}
+    for spec in stored.repositories:
+        bench = load_generation_benchmark(root / spec.benchmark_path)
+        benchmarks[spec.repository_id] = bench.questions
+        digests[spec.repository_id] = benchmark_digest(bench)
+        if digests[spec.repository_id] != spec.benchmark_digest:
+            raise BenchmarkFormatError(
+                f"{spec.repository_id}: the benchmark differs from the protocol"
+            )
+    spec = build_pilot_spec(stored.name, protocol_hash(stored), benchmarks, digests)
+    target = root / args.pilot_spec
+    text = dump_pilot_spec(spec)
+    if target.exists():
+        if target.read_text(encoding="utf-8") == text:
+            print(f"{args.pilot_spec} already records exactly this selection (unchanged)")
+            return 0
+        print(f"{target.name} already exists and differs; a recorded pilot is never overwritten",
+              file=sys.stderr)  # fmt: skip
+        return 2
+    write_text_atomically(target, text)
+    for repo, ids in spec.questions.items():
+        print(f"{repo}: {', '.join(ids)}")
+    print(f"wrote {args.pilot_spec}; bounds {spec.bounds}")
+    return 0
+
+
 def _cmd_plan(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.root)
-    protocol = _resolved(load_protocol(root / args.protocol), args.confirm_model)
-    contexts = _contexts(protocol, root, settings, args.repository, with_retriever=False)
+    stored = load_protocol(root / args.protocol)
+    pilot = _pilot(args, root, stored)
+    if pilot is not None and args.historical:
+        raise ValueError("--historical is not allowed with --pilot (a pilot generates afresh)")
+    protocol = _resolved(stored, args.confirm_model)
+    contexts = _contexts(
+        protocol, root, settings, args.repository, with_retriever=False, pilot=pilot
+    )
     historical, notes = _historical(protocol, contexts, args.historical, root)
     out_dir = root / args.output_dir
     plan = plan_run(contexts, protocol, output_dir=out_dir, historical=historical)
     print("DRY RUN - no provider is constructed or called")
+    if pilot is not None:
+        print(f"PILOT {pilot.name}: separate namespace {args.output_dir}; not part of the primary")
+        for repo, ids in pilot.questions.items():
+            print(f"  pilot questions {repo}: {', '.join(ids)}")
+        print(f"  bounds: {pilot.bounds}")
     print(f"protocol: {protocol.name}  hash: {protocol_hash(protocol)}")
     model = (
         f"{protocol.llm_provider}/{protocol.llm_model}"
@@ -319,12 +394,19 @@ def _cmd_run(args: argparse.Namespace, settings: Settings) -> int:
         print("refusing to run: pass --confirm-model PROVIDER/MODEL to confirm the model that "
               "generates both arms", file=sys.stderr)  # fmt: skip
         return 2
-    protocol = _resolved(load_protocol(root / args.protocol), args.confirm_model)
+    stored = load_protocol(root / args.protocol)
+    pilot = _pilot(args, root, stored)
+    if pilot is not None and args.historical:
+        print("refusing to run: --historical is not allowed with --pilot", file=sys.stderr)
+        return 2
+    protocol = _resolved(stored, args.confirm_model)
     llm = create_client(settings)
     if (llm.provider, llm.model) != (protocol.llm_provider, protocol.llm_model):
         print("refusing to run: the configured client is not the confirmed model", file=sys.stderr)
         return 2
-    contexts = _contexts(protocol, root, settings, args.repository, with_retriever=True)
+    contexts = _contexts(
+        protocol, root, settings, args.repository, with_retriever=True, pilot=pilot
+    )
     historical, notes = _historical(protocol, contexts, args.historical, root)
     for note in notes:
         print(f"historical: {note}", file=sys.stderr)
@@ -346,7 +428,9 @@ def _cmd_run(args: argparse.Namespace, settings: Settings) -> int:
 
 def _cmd_judge(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.root)
-    protocol = _resolved(load_protocol(root / args.protocol), args.confirm_model)
+    stored = load_protocol(root / args.protocol)
+    pilot = _pilot(args, root, stored)
+    protocol = _resolved(stored, args.confirm_model)
     if not args.judge_model:
         print("refusing to judge: pass --judge-model (a different model family from the "
               "generator is recommended)", file=sys.stderr)  # fmt: skip
@@ -360,6 +444,7 @@ def _cmd_judge(args: argparse.Namespace, settings: Settings) -> int:
     for spec in _selected(protocol, args.repository):
         bench, files = _check_benchmark(spec, root, settings)
         run = load_run(run_path(out_dir, spec.repository_id))
+        _expect_scope(run, pilot, spec.repository_id)
         questions = {q.id: q for q in bench.questions}
         refs = {q.id: build_reference(q, files) for q in bench.questions}
         path = judgement_path(out_dir, spec.repository_id)
@@ -373,13 +458,15 @@ def _cmd_judge(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _repo_inputs(protocol: PrimaryProtocol, root: Path, out_dir: Path, settings: Settings,
-                 names: Sequence[str]) -> tuple[list[RepoInputs], dict[str, str]]:  # fmt: skip
+                 names: Sequence[str], pilot: PilotSpec | None = None
+                 ) -> tuple[list[RepoInputs], dict[str, str]]:  # fmt: skip
     inputs: list[RepoInputs] = []
     files_by_label: dict[str, str] = {}
     for spec in _selected(protocol, names):
         bench, files = _check_benchmark(spec, root, settings)
         run_file = run_path(out_dir, spec.repository_id)
         run = load_run(run_file)
+        _expect_scope(run, pilot, spec.repository_id)
         if run.protocol_hash != protocol_hash(protocol):
             raise RunMismatchError(f"{spec.repository_id}: the run belongs to another protocol")
         judge_file = judgement_path(out_dir, spec.repository_id)
@@ -387,7 +474,11 @@ def _repo_inputs(protocol: PrimaryProtocol, root: Path, out_dir: Path, settings:
         inputs.append(
             RepoInputs(
                 run=run,
-                questions={q.id: q for q in bench.questions},
+                questions={
+                    q.id: q
+                    for q in bench.questions
+                    if pilot is None or q.id in pilot.questions.get(spec.repository_id, ())
+                },
                 inventory=build_inventory(files, spec.repository_id),
                 judgements=judgements,
                 run_file=run_file.name,
@@ -407,12 +498,18 @@ def _cmd_report(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.root)
     out_dir = root / args.output_dir
     stored = load_protocol(root / args.protocol)
+    pilot = _pilot(args, root, stored)
     # the run's protocol hash includes the confirmed model; recover it from the run files
     first = load_run(run_path(out_dir, _selected(stored, args.repository)[0].repository_id))
+    _expect_scope(first, pilot, "first run file")
     protocol = stored.with_model(first.llm_provider, first.llm_model)
-    inputs, labels = _repo_inputs(protocol, root, out_dir, settings, args.repository)
-    report = build_report(inputs, protocol, input_files=labels)
-    suffix = "-TEST-ARTIFACT" if report["test_artifact"] else ""
+    inputs, labels = _repo_inputs(protocol, root, out_dir, settings, args.repository, pilot)
+    report = build_report(
+        inputs, protocol, input_files=labels, scope="pilot" if pilot is not None else "primary"
+    )
+    suffix = ("-PILOT" if pilot is not None else "") + (
+        "-TEST-ARTIFACT" if report["test_artifact"] else ""
+    )
     json_path = out_dir / f"report{suffix}.json"
     md_path = out_dir / f"report{suffix}.md"
     write_text_atomically(json_path, json.dumps(report, indent=2, ensure_ascii=False) + "\n")
@@ -577,17 +674,30 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--retry-max-delay", type=float, default=60.0)
         p.add_argument("--retry-max-attempts", type=int, default=5)
 
+    def pilot_flags(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--pilot", action="store_true",
+            help="the bounded pilot: predefined questions, separate output directory",
+        )  # fmt: skip
+        p.add_argument("--pilot-spec", default=PILOT_SPEC_PATH)
+
     init = sub.add_parser("protocol-init", help="write the frozen primary protocol")
     common(init)
     init.add_argument("--force", action="store_true")
 
+    pilot_init = sub.add_parser("pilot-init", help="record the pilot questions (offline)")
+    common(pilot_init)
+    pilot_init.add_argument("--pilot-spec", default=PILOT_SPEC_PATH)
+
     plan = sub.add_parser("plan", help="dry run (no provider)")
     common(plan)
+    pilot_flags(plan)
     plan.add_argument("--confirm-model", help="PROVIDER/MODEL (optional for a plan)")
     plan.add_argument("--historical", action="append", default=[], help="a comparison file")
 
     run = sub.add_parser("run", help="generate answers (hosted)")
     common(run)
+    pilot_flags(run)
     retry_flags(run)
     run.add_argument("--confirm-model", help="PROVIDER/MODEL that generates both arms")
     run.add_argument("--historical", action="append", default=[])
@@ -596,12 +706,14 @@ def _parser() -> argparse.ArgumentParser:
 
     judge = sub.add_parser("judge", help="judge answers (hosted)")
     common(judge)
+    pilot_flags(judge)
     retry_flags(judge)
     judge.add_argument("--confirm-model", help="the generation model (to resolve the protocol)")
     judge.add_argument("--judge-model", help="the judge model id")
 
     report = sub.add_parser("report", help="analysis report (offline)")
     common(report)
+    pilot_flags(report)
 
     worksheet = sub.add_parser("audit-worksheet", help="sample and write the blinded worksheet")
     common(worksheet)
@@ -628,10 +740,13 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if getattr(args, "pilot", False) and args.output_dir == DEFAULT_OUTPUT_DIR:
+        args.output_dir = DEFAULT_PILOT_OUTPUT_DIR  # a pilot never defaults into the primary dir
     setup_logging()
     settings = get_settings()
     commands = {
         "protocol-init": _cmd_protocol_init,
+        "pilot-init": _cmd_pilot_init,
         "plan": _cmd_plan,
         "run": _cmd_run,
         "judge": _cmd_judge,
@@ -647,7 +762,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 130
     except (
         SecurityError, LLMError, ValueError, BenchmarkFormatError, RunMismatchError,
-        JudgementMismatchError, EvaluationError, FileNotFoundError,
+        JudgementMismatchError, EvaluationError, FileNotFoundError, PilotMismatchError,
     ) as exc:  # fmt: skip
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2

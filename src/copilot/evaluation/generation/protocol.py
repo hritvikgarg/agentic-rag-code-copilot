@@ -22,7 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from copilot.evaluation.generation.compat import ORIGINAL_RETRIEVER, PINNED_PROMPT_DIGESTS
 
 PROTOCOL_SCHEMA = "generation-protocol/1"
-PROTOCOL_PATH = "generation-eval/protocol/primary-protocol.json"
+#: The protocol to use (v1.1: see ``Amendment``). The original v1 file is kept, unchanged.
+PROTOCOL_PATH = "generation-eval/protocol/primary-protocol-v1.1.json"
+PROTOCOL_V1_PATH = "generation-eval/protocol/primary-protocol.json"
+#: SHA-256 of the v1 file's bytes: a test proves it is byte-for-byte what was first frozen.
+PROTOCOL_V1_FILE_SHA256 = "b6b63524af575d5bfbf2cf6f16298cc4613bb3e4e7463d0da05570ad87adc09f"
 
 
 class Endpoint(BaseModel):
@@ -60,6 +64,20 @@ class JudgeSettings(BaseModel):
     note: str = ""
 
 
+class Amendment(BaseModel):
+    """A transparent, versioned change to a frozen protocol, made before any real generation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: str
+    amends_file: str
+    amends_file_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    made_before_any_real_generation: bool
+    rationale: str
+    changes: tuple[str, ...]
+    unchanged: tuple[str, ...]
+
+
 class PrimaryProtocol(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -90,6 +108,7 @@ class PrimaryProtocol(BaseModel):
     bootstrap_seed: int = 11
     confidence: float = 0.95
     limitations: tuple[str, ...] = ()
+    amendment: Amendment | None = None  # None for the original v1 (and then not serialised)
 
     @property
     def model_confirmed(self) -> bool:
@@ -108,8 +127,13 @@ class PrimaryProtocol(BaseModel):
         raise KeyError(repository_id)
 
 
+def _payload(protocol: PrimaryProtocol) -> dict[str, object]:
+    """The serialised protocol; an absent amendment is omitted so v1 stays byte-identical."""
+    return protocol.model_dump(mode="json", exclude=None if protocol.amendment else {"amendment"})
+
+
 def canonical_json(protocol: PrimaryProtocol) -> str:
-    return json.dumps(protocol.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return json.dumps(_payload(protocol), sort_keys=True, separators=(",", ":"))
 
 
 def protocol_hash(protocol: PrimaryProtocol) -> str:
@@ -118,7 +142,7 @@ def protocol_hash(protocol: PrimaryProtocol) -> str:
 
 
 def dump_protocol(protocol: PrimaryProtocol) -> str:
-    return json.dumps(protocol.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n"
+    return json.dumps(_payload(protocol), indent=2, ensure_ascii=False) + "\n"
 
 
 def load_protocol(path: str | Path) -> PrimaryProtocol:
@@ -140,7 +164,17 @@ PRIMARY_ENDPOINT = Endpoint(
 )
 
 SECONDARY_ENDPOINTS: tuple[Endpoint, ...] = (
-    Endpoint(name="groundedness", definition="Judge groundedness grade 0-2 (answerable and not)."),
+    Endpoint(
+        name="groundedness",
+        definition=(
+            "Judge groundedness grade 0-2, reported in two forms: overall (every scored response, "
+            "including rule-scored system abstentions, which make no claims and receive 2 by "
+            "convention) and over substantive generated answers (judge-scored, not abstaining). "
+            "Denominators and the judge-scored/rule-scored split are reported; read it with "
+            "correctness, completeness and the false-refusal rate - an abstention raises "
+            "groundedness without being a better answer."
+        ),
+    ),
     Endpoint(name="completeness", definition="Fraction of key facts judged supported."),
     Endpoint(
         name="citation correctness",
@@ -160,12 +194,18 @@ SECONDARY_ENDPOINTS: tuple[Endpoint, ...] = (
     ),
     Endpoint(
         name="appropriate abstention",
-        definition="Unanswerable questions: share of responses that abstain (system or text).",
+        definition=(
+            "Unanswerable questions: share of responses classified insufficient_evidence. A "
+            "generated response is classified from the judge's response_type (gen-judge-2), a "
+            "system abstention by rule, and a response without a valid judge rating is "
+            "'unrated' (never classified by pattern matching). Cue-pattern labels are reported "
+            "only as a diagnostic with their disagreements and concordance counts."
+        ),
     ),
     Endpoint(
         name="false refusal",
-        definition="Answerable questions: share of responses that refuse or say evidence is "
-        "insufficient.",
+        definition="Answerable questions: share of responses classified insufficient_evidence or "
+        "generic_refusal (same classification and unrated handling as appropriate abstention).",
     ),
     Endpoint(
         name="retrieval relevance",
@@ -179,6 +219,14 @@ SECONDARY_ENDPOINTS: tuple[Endpoint, ...] = (
     Endpoint(
         name="tokens",
         definition="Input, output and reasoning tokens reported by the provider (when reported).",
+    ),
+    Endpoint(
+        name="historical-response sensitivity",
+        definition=(
+            "The primary endpoint repeated after excluding every question that has a reused "
+            "historical response, reported next to the primary result with sample sizes, the "
+            "number of excluded pairs and bootstrap intervals."
+        ),
     ),
     Endpoint(
         name="end-to-end reliability",
@@ -197,13 +245,51 @@ DEFAULT_LIMITATIONS: tuple[str, ...] = (
     "judge self-preference toward the generator's model family is possible.",
     "Plain-v2 receives the same honesty rules as RAG but cannot cite [Source n]; citation "
     "metrics are therefore RAG-only unless the plain answer writes explicit locations.",
+    "Reused historical responses came from a hosted model that may have drifted since they were "
+    "produced, and their packed prompt was not recorded in full (only pinned prompt-template "
+    "digests, the question, the index identity and the retrieved chunk ids); the historical "
+    "sensitivity analysis shows the effect of excluding them.",
+)
+
+V1_1_AMENDMENT = Amendment(
+    version="1.1",
+    amends_file=PROTOCOL_V1_PATH,
+    amends_file_sha256=PROTOCOL_V1_FILE_SHA256,
+    made_before_any_real_generation=True,
+    rationale=(
+        "The M11A acceptance review found that the abstention metrics, the groundedness "
+        "secondary endpoint and the judge prompt did not measure what their names suggest "
+        "(cue-pattern abstention labels disagree with the judge; rule-scored abstentions inflate "
+        "groundedness). The changes are made before any real generation call, so no outcome "
+        "influenced them. The original v1 file is preserved unchanged."
+    ),
+    changes=(
+        "judge.prompt_version gen-judge-1 -> gen-judge-2 (adds the required closed response_type "
+        "field; the rubric gen-rubric-1 and its scoring are unchanged)",
+        "secondary endpoints 'appropriate abstention' and 'false refusal': classification from the "
+        "judge response_type / system rule, 'unrated' when no valid judge rating, cue patterns "
+        "only as a diagnostic",
+        "secondary endpoint 'groundedness': overall and substantive-generated forms with "
+        "denominators",
+        "new secondary endpoint 'historical-response sensitivity'",
+        "limitations: reused historical responses (possible hosted-model drift, incomplete "
+        "packed-prompt provenance)",
+        "audit procedure (not hashed content): the official sample is drawn only after "
+        "generation and judging are final, from eligible pairs, with the eligible and "
+        "full-population fractions reported",
+    ),
+    unchanged=(
+        "arms, prompts (plain-v2, rag-v1) and their pinned digests, retriever, top-k, temperature, "
+        "max_output_tokens, repositories, benchmarks, key facts, rubric gen-rubric-1",
+        "the primary endpoint, its definition, the bootstrap settings and the audit fraction/seed",
+    ),
 )
 
 
 def default_protocol(repositories: tuple[RepositorySpec, ...]) -> PrimaryProtocol:
     """The frozen protocol for the given repositories (model left unconfirmed)."""
     return PrimaryProtocol(
-        name="plain-vs-rag-primary-v1",
+        name="plain-vs-rag-primary-v1.1",
         arm_a="plain LLM (plain-v2 prompt, no repository evidence)",
         arm_b="repository-aware RAG (rag-v1 prompt, original line retriever, top-k 5)",
         plain_prompt_version="plain-v2",
@@ -241,9 +327,10 @@ def default_protocol(repositories: tuple[RepositorySpec, ...]) -> PrimaryProtoco
         primary_endpoint=PRIMARY_ENDPOINT,
         secondary_endpoints=SECONDARY_ENDPOINTS,
         judge=JudgeSettings(
-            prompt_version="gen-judge-1",
+            prompt_version="gen-judge-2",
             rubric_version="gen-rubric-1",
             note="Blind to the arm; a different model family from the generator is recommended.",
         ),
         limitations=DEFAULT_LIMITATIONS,
+        amendment=V1_1_AMENDMENT,
     )

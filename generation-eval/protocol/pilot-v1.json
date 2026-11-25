@@ -1,0 +1,35 @@
+{
+  "schema_version": "generation-pilot/1",
+  "name": "plain-vs-rag-pilot-v1",
+  "protocol_name": "plain-vs-rag-primary-v1.1",
+  "protocol_sha256": "0fb4985c7146d0bcc6042567f761a54b2e3c6e3534579f307d2fde88bca24db6",
+  "selection_rule": "For each repository and each answerability (answerable, unanswerable) choose the question whose SHA-256 of '<seed>|<repository_id>|<answerability>|<question_id>' is smallest. Only question ids and the answerability flag are read. No historical answer, retrieval result, judge score or M10 outcome is used.",
+  "selection_seed": "generation-pilot-v1",
+  "questions": {
+    "copilot": [
+      "impl-faiss-persist",
+      "u-uptime"
+    ],
+    "inventory-orders": [
+      "io-price-snapshot",
+      "io-u-payment"
+    ]
+  },
+  "benchmark_digests": {
+    "copilot": "c21ef79e6e32cd0b02b5fbdeb8919b8de5f1b96cd4869fbe838c3ba258ed43bd",
+    "inventory-orders": "1a83110e682869fc36368cb8db42f4cd16d0d5993dbff9a01fb3d4e65a1b8153"
+  },
+  "recorded_before_any_live_execution": true,
+  "output_namespace": "data/generation-eval/pilot",
+  "bounds": {
+    "questions": 4,
+    "generation_calls_max": 8,
+    "judge_calls_max": 8,
+    "provider_calls_max_before_retries": 16
+  },
+  "notes": [
+    "Same resolved protocol, prompts, judge and rubric as the primary run.",
+    "Separate artifact namespace; runs carry scope=pilot; no historical reuse.",
+    "Not imported into the primary analysis; far too small for inference."
+  ]
+}

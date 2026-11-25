@@ -556,12 +556,7 @@ def caveats(
     reused = sum(reliability[a]["reused_historical"] for a in ("plain", "rag"))  # type: ignore[index]
     if reused:
         out.append(f"{reused} side(s) were reused from earlier verified historical responses.")
-        out.append(
-            "Reused historical responses came from a hosted model that may have drifted since, and "
-            "their packed prompt was not recorded in full (only pinned prompt-template digests, "
-            "the question, the index and the retrieved chunk ids). See the historical sensitivity "
-            "analysis, which excludes every question with a reused side."
-        )
+        out.append("See the historical sensitivity analysis (it excludes every reused question).")
     per_arm = combined["per_arm"]  # type: ignore[index]
     unrated = sum(
         per_arm[a]["abstention_sources"]["unrated_missing_judge_rating"] for a in ("plain", "rag")
@@ -576,7 +571,11 @@ def caveats(
 
 
 def build_report(
-    inputs: Sequence[RepoInputs], protocol: PrimaryProtocol, *, input_files: Mapping[str, str]
+    inputs: Sequence[RepoInputs],
+    protocol: PrimaryProtocol,
+    *,
+    input_files: Mapping[str, str],
+    scope: str = "primary",
 ) -> dict[str, object]:
     """The machine-readable report. ``input_files`` maps a label to its path for hashing."""
     rows: list[dict[str, object]] = []
@@ -585,6 +584,7 @@ def build_report(
     result = analyse(rows, protocol)
     return {
         "schema_version": REPORT_SCHEMA,
+        "scope": scope,
         "test_artifact": any(
             i.run.test_artifact or (i.judgements is not None and i.judgements.test_artifact)
             for i in inputs
@@ -593,7 +593,15 @@ def build_report(
         "primary_endpoint": protocol.primary_endpoint.model_dump(),
         "input_sha256": {label: file_sha256(path) for label, path in sorted(input_files.items())},
         "analysis": result,
-        "caveats": caveats(inputs, protocol, result),
+        "caveats": (
+            [
+                "PILOT: a bounded pilot of predefined questions. It is not part of the primary "
+                "analysis, must not be pooled with it, and is far too small for inference."
+            ]
+            if scope == "pilot"
+            else []
+        )
+        + caveats(inputs, protocol, result),
         "rows": rows,
     }
 
@@ -616,6 +624,12 @@ def render_markdown(report: Mapping[str, object]) -> str:
         lines += [
             "> **TEST ARTIFACT - not an experimental result.** Produced with a fake provider to "
             "exercise the pipeline.",
+            "",
+        ]
+    if report.get("scope") == "pilot":
+        lines += [
+            "> **PILOT - not the primary experiment.** Predefined questions only; never pooled "
+            "with or imported into the primary analysis.",
             "",
         ]
     lines += [f"Protocol hash: `{report['protocol_hash']}`", ""]
