@@ -1,0 +1,66 @@
+{
+  "schema": "judge-validation-hosted/1",
+  "version": "judge-validation-v1-hosted",
+  "declared": "Milestone 11B closeout. Committed BEFORE any hosted judge call on the synthetic controls or the pilot. The local judge (llama3.1:8b, Q4_K_M) failed judge-validation-v1; that result is preserved and is NOT a reason to change anything here. This profile applies judge-validation-v1 to a hosted judge. It changes no threshold, no control, no expected verdict, no judge prompt (gen-judge-2) and no rubric (gen-rubric-1). It only says how the three criteria that were written around a local runtime (T3, T5, T6) identify the judge when the provider is a hosted API, and which parts of the local runtime description do not exist for a hosted API.",
+  "base_spec": {
+    "path": "generation-eval/judge-validation/judge-validation-v1.json",
+    "version": "judge-validation-v1",
+    "sha256": "aa8af417b0eceb0347abebdb3fefa9ca833f7e737521e3f0511f002f049aa81a"
+  },
+  "judge": {
+    "provider": "gemini",
+    "model": null,
+    "model_rule": "No model id is named here: availability cannot be verified offline and an id must not be invented. The operator names the judge model with --judge-model on every command and with --expect-judge-model on judge-validate; the report records it, and T5H fails if any artifact was judged by a different id. A model that differs from the generation model is preferred; if the same model is used the report states self-preference bias.",
+    "temperature": 0.0,
+    "max_output_tokens": "the frozen protocol's judge.max_output_tokens (passed to judge-validate from the protocol, not chosen here)",
+    "judge_prompt_version": "gen-judge-2",
+    "rubric_version": "gen-rubric-1"
+  },
+  "inherited_unchanged": {
+    "criteria": [
+      "T1",
+      "T2",
+      "T4",
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "P1",
+      "P2",
+      "P3",
+      "P4"
+    ],
+    "meaning": "Same rule, same threshold, read from judge-validation-v1.json (pinned above by sha256). T2 still needs all 18 first-pass model controls to parse (0.95 of 18). S5 still needs >= 0.95 identical correctness scores between two independent passes. The controls (controls-v1.json), expected verdicts and the 8-answer pilot rules (no kappa below n = 30; fewer than 4 rated answers is inconclusive) are unchanged."
+  },
+  "adapted": {
+    "T3": {
+      "becomes": "T3 (output cap only)",
+      "rule": "No successful judgement may show completion tokens plus reasoning tokens at or above the protocol's judge output cap, and token counts must be present. The input-window half of v1 T3 has no hosted counterpart (see not_applicable); a request the provider rejects for length is a failed record, as for any provider error.",
+      "max_violations": 0
+    },
+    "T5": {
+      "becomes": "T5H_hosted_judge_identity",
+      "rule": "Every controls and pilot artifact names provider gemini and exactly the model id given with --expect-judge-model, and all artifacts agree. This replaces the fingerprint, digest, quantization, seed and context checks, which a hosted API does not expose."
+    },
+    "T6": {
+      "becomes": "T6 (identity instead of fingerprint)",
+      "rule": "Unchanged independence checks (second pass bypasses the cache, uses its own directory, reuses nothing) plus: both passes were judged by the same provider and model id."
+    }
+  },
+  "not_applicable": {
+    "model_digest": "A hosted API returns no weights digest.",
+    "quantization": "Not controllable or reported for a hosted model.",
+    "context_size_input_overflow": "No client-side window is configured; the hosted window is far larger than any judge prompt here. Silent input truncation is not a documented behaviour of this client's hosted path, but that is not verified; the guard against output truncation (T3) remains.",
+    "seed": "The hosted client sets temperature 0 but no seed; hosted output is therefore NOT claimed to be deterministic, which is exactly what S5 measures.",
+    "structured_output_mode": "The hosted judge relies on the prompt's strict-JSON instruction, not a server-side JSON mode.",
+    "runtime_fingerprint": "No local runtime exists to fingerprint. The requested model id is the only identity this client records; a provider may re-point a model id over time, so judging must not straddle a provider-announced model change."
+  },
+  "procedural_requirements": [
+    "Do not resume a controls or pilot judge run to re-attempt items that failed with 'invalid judge output': that would mask format unreliability that T2 and T1 exist to measure. Resume only after transport interruptions (HTTP 429/503/504, timeout, circuit breaker).",
+    "Run the validation (controls, pilot, human agreement) before any primary judging, and keep validation, pilot and primary artifacts in separate directories.",
+    "Record the judge model id and the date of each run; a result is tied to that id only.",
+    "Report self-preference: whether the judge model equals the generation model (gemini-3.6-flash), and note that a different model from the same vendor reduces but does not remove it."
+  ],
+  "interpretation": "Meeting T1-T6 and S1-S5 means the hosted judge showed no pilot-level red flag; it does not validate the judge. Only the primary-audit criteria P1-P4, evaluated once on the primary human audit, decide whether conclusions that depend on the judge are validated or EXPLORATORY."
+}

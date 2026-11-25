@@ -486,8 +486,18 @@ def test_preflight_errors_are_clear_and_secret_free(project, capsys, ollama):
     assert all("pull" not in p for p in server.paths)
 
 
-def test_preflight_only_applies_to_a_local_judge(project, capsys):
+def test_a_hosted_preflight_never_builds_a_client_and_needs_the_hosted_profile(
+    project, capsys, monkeypatch
+):
+    """Since the closeout the hosted preflight exists (offline); it is exercised in full in
+    ``test_hosted_judge_validation.py``. Here: it builds no client, and a project without the
+    hosted profile is refused rather than passed."""
+
+    def boom(*args, **kwargs):  # pragma: no cover - only reached on a bug
+        raise AssertionError("a provider client was constructed")
+
+    monkeypatch.setattr(cli, "create_client", boom)
     argv = ["judge-preflight", "--root", str(project), "--judge-provider", "gemini",
-            "--judge-model", "x"]  # fmt: skip
+            "--judge-model", "x", "--judgements-dir", str(project / "v")]  # fmt: skip
     assert cli.main(argv) == 2
-    assert "local judge" in capsys.readouterr().err
+    assert "hosted-judge profile" in capsys.readouterr().err

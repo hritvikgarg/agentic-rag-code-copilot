@@ -27,6 +27,9 @@ from copilot.llm.runtime import RuntimeIdentity
 
 VALIDATION_SPEC_PATH = "generation-eval/judge-validation/judge-validation-v1.json"
 VALIDATION_SPEC_SCHEMA = "judge-validation/1"
+HOSTED_PROFILE_PATH = "generation-eval/judge-validation/judge-validation-v1-hosted.json"
+HOSTED_PROFILE_SCHEMA = "judge-validation-hosted/1"
+HOSTED_PROVIDER = "gemini"
 REQUIRED_SECTIONS = (
     "judge",
     "controls",
@@ -55,6 +58,50 @@ def load_validation_spec(path: str | Path) -> dict[str, Any]:
     if missing:
         raise ValidationSpecError(f"the validation specification lacks: {', '.join(missing)}")
     return spec
+
+
+class HostedProfileError(ValueError):
+    """The hosted-judge profile is missing, malformed, or not tied to the exact v1 thresholds."""
+
+
+def load_hosted_profile(
+    path: str | Path, base_spec_path: str | Path = VALIDATION_SPEC_PATH
+) -> dict[str, Any]:
+    """Load the hosted-judge profile and check it names the exact v1 specification it inherits.
+
+    The profile changes no threshold: it pins the sha256 of ``judge-validation-v1.json`` and states
+    which criteria are adapted (and why) because a hosted API has no local runtime to fingerprint.
+    """
+    try:
+        profile = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HostedProfileError(f"cannot read the hosted-judge profile: {path}") from exc
+    if not isinstance(profile, dict) or profile.get("schema") != HOSTED_PROFILE_SCHEMA:
+        raise HostedProfileError("not a judge-validation-hosted/1 profile")
+    for name in ("base_spec", "judge", "inherited_unchanged", "adapted", "not_applicable"):
+        if name not in profile:
+            raise HostedProfileError(f"the hosted-judge profile lacks: {name}")
+    if profile["base_spec"].get("sha256") != spec_sha256(base_spec_path):
+        raise HostedProfileError(
+            "the hosted-judge profile was written for a different judge-validation-v1 file"
+        )
+    if profile["judge"].get("provider") != HOSTED_PROVIDER:
+        raise HostedProfileError(f"the hosted profile is for provider {HOSTED_PROVIDER!r}")
+    return profile
+
+
+@dataclass(frozen=True)
+class HostedContext:
+    """What the hosted adaptations of T3/T5/T6 compare against."""
+
+    expected_model: str
+    max_output_tokens: int
+
+    def __post_init__(self) -> None:
+        if not self.expected_model.strip():
+            raise HostedProfileError("the expected hosted judge model must be named explicitly")
+        if self.max_output_tokens < 16:
+            raise HostedProfileError("the hosted judge output cap is not valid")
 
 
 # --------------------------------------------------------------------------- evaluation
@@ -108,7 +155,21 @@ def _pilot_records(files: Mapping[str, JudgementFile]):
             yield repo, item
 
 
-def evaluate_technical(spec: Mapping[str, Any], inputs: ValidationInputs) -> list[dict[str, Any]]:
+def _identities(inputs: ValidationInputs) -> list[tuple[str, str, str]]:
+    """``(artifact, provider, model)`` for every judge artifact of a hosted validation run."""
+    out: list[tuple[str, str, str]] = []
+    for label, run in (("controls", inputs.controls), ("controls-repeat", inputs.controls_repeat)):
+        if run is not None:
+            out.append((label, run.judge_provider, run.judge_model))
+    for label, files in (("pilot", inputs.pilot), ("pilot-repeat", inputs.pilot_repeat)):
+        for repo, file in files.items():
+            out.append((f"{label}:{repo}", file.judge_provider, file.judge_model))
+    return out
+
+
+def evaluate_technical(
+    spec: Mapping[str, Any], inputs: ValidationInputs, hosted: HostedContext | None = None
+) -> list[dict[str, Any]]:
     tech = spec["technical_acceptance"]
     judge = spec["judge"]
     out: list[dict[str, Any]] = []
@@ -174,6 +235,22 @@ def evaluate_technical(spec: Mapping[str, Any], inputs: ValidationInputs) -> lis
         )
     else:
         for label, records, runtime in sources:
+            if hosted is not None:
+                # Hosted adaptation: there is no local window to overflow, so only the output cap
+                # applies. Reasoning tokens count against the cap (docs/llm.md, "Thinking models").
+                cap = hosted.max_output_tokens
+                for rec in records:
+                    if rec.state != "successful":
+                        continue
+                    c = rec.completion_tokens
+                    if c is None:
+                        violations.append(f"{label}/{rec.question_id}: token counts missing")
+                    elif c + (rec.reasoning_tokens or 0) >= cap:
+                        violations.append(
+                            f"{label}/{rec.question_id}: completion {c} + reasoning "
+                            f"{rec.reasoning_tokens or 0} reaches the {cap}-token cap"
+                        )
+                continue
             if not runtime:
                 violations.append(f"{label}: no runtime description to check against")
                 continue
@@ -227,7 +304,29 @@ def evaluate_technical(spec: Mapping[str, Any], inputs: ValidationInputs) -> lis
 
     # T5 - fingerprints present, recomputable, equal to the declared judge, shared by all artifacts
     runtimes = _artifact_runtimes(inputs)
-    if not runtimes:
+    if hosted is not None:
+        identities = _identities(inputs)
+        if not identities:
+            out.append(_crit("T5H_hosted_judge_identity", NOT_EVALUATED, "no artifacts"))
+        else:
+            problems = [
+                f"{label}: judge is {provider}/{model}, expected "
+                f"{HOSTED_PROVIDER}/{hosted.expected_model}"
+                for label, provider, model in identities
+                if (provider, model) != (HOSTED_PROVIDER, hosted.expected_model)
+            ]
+            out.append(
+                _crit(
+                    "T5H_hosted_judge_identity",
+                    PASS if not problems else FAIL,
+                    f"{len(problems)} problem(s) across {len(identities)} artifact(s); the hosted "
+                    "API exposes no digest, quantization or seed, so provider and model id are the "
+                    "whole identity",
+                    problems=problems[:20],
+                    judge=f"{HOSTED_PROVIDER}/{hosted.expected_model}",
+                )
+            )
+    elif not runtimes:
         out.append(_crit("T5_valid_runtime_fingerprint", NOT_EVALUATED, "no artifacts"))
     else:
         problems = []
@@ -280,6 +379,13 @@ def evaluate_technical(spec: Mapping[str, Any], inputs: ValidationInputs) -> lis
                 and rep.runtime_fingerprint != inputs.controls.runtime_fingerprint
             ):
                 problems.append("the control passes have different runtime fingerprints")
+            if (
+                hosted is not None
+                and inputs.controls is not None
+                and (rep.judge_provider, rep.judge_model)
+                != (inputs.controls.judge_provider, inputs.controls.judge_model)
+            ):
+                problems.append("the control passes were judged by different hosted models")
             if inputs.controls_dir and inputs.controls_dir == inputs.controls_repeat_dir:
                 problems.append("both control passes share a directory")
         for repo, file in inputs.pilot_repeat.items():
@@ -291,6 +397,13 @@ def evaluate_technical(spec: Mapping[str, Any], inputs: ValidationInputs) -> lis
                 and first.judge_runtime_fingerprint != file.judge_runtime_fingerprint
             ):
                 problems.append(f"{repo}: the pilot passes have different runtime fingerprints")
+            if (
+                hosted is not None
+                and first is not None
+                and (first.judge_provider, first.judge_model)
+                != (file.judge_provider, file.judge_model)
+            ):
+                problems.append(f"{repo}: the pilot passes were judged by different hosted models")
         if inputs.pilot_dir and inputs.pilot_dir == inputs.pilot_repeat_dir:
             problems.append("both pilot passes share a directory")
         out.append(
@@ -536,13 +649,51 @@ def evaluate_primary_audit(spec: Mapping[str, Any], agreement: Mapping[str, Any]
     }
 
 
+def _self_preference(inputs: ValidationInputs) -> dict[str, Any]:
+    """Documented, never scored: does the judge also generate the answers it grades?"""
+    flags = sorted(
+        {file.same_model_as_generator for file in inputs.pilot.values()}
+        | {file.same_model_as_generator for file in inputs.pilot_repeat.values()}
+    )
+    if not flags:
+        return {
+            "same_model_as_generator": None,
+            "note": "no pilot judgements were given, so the judge/generator relation is unknown",
+        }
+    same = True in flags
+    return {
+        "same_model_as_generator": same,
+        "note": (
+            "the judge model IS the generation model: LLM judges can favour their own model's "
+            "text (self-preference bias); conclusions that rest on this judge must say so"
+            if same
+            else "the judge model differs from the generation model, which reduces but does not "
+            "remove self-preference when both come from the same vendor family"
+        ),
+    }
+
+
 def evaluate_validation(
-    spec: Mapping[str, Any], inputs: ValidationInputs, spec_hash: str
+    spec: Mapping[str, Any],
+    inputs: ValidationInputs,
+    spec_hash: str,
+    *,
+    hosted: HostedContext | None = None,
+    profile: Mapping[str, Any] | None = None,
+    profile_hash: str | None = None,
 ) -> dict[str, Any]:
-    technical = evaluate_technical(spec, inputs)
+    """Evaluate the artifacts against ``spec``; with ``hosted`` the hosted adaptations apply.
+
+    A hosted run needs both the profile (so its hash is recorded) and the context (the model id
+    the operator declared). Thresholds always come from ``spec``; the profile adapts only how
+    T3/T5/T6 identify the judge and never relaxes a threshold.
+    """
+    if (hosted is None) != (profile is None):
+        raise HostedProfileError("a hosted evaluation needs both the profile and the context")
+    technical = evaluate_technical(spec, inputs, hosted)
     semantic = evaluate_semantic(spec, inputs)
     t, s = _roll_up(technical), _roll_up(semantic)
-    return {
+    report: dict[str, Any] = {
         "validation_spec": {"version": spec["version"], "sha256": spec_hash},
         "technical_acceptance": {"status": t, "criteria": technical},
         "semantic_pilot_acceptance": {"status": s, "criteria": semantic},
@@ -551,3 +702,13 @@ def evaluate_validation(
         else (FAIL if FAIL in (t, s) else "INCOMPLETE"),
         "interpretation": spec["interpretation"],
     }
+    if hosted is not None and profile is not None:
+        report["hosted_profile"] = {
+            "version": profile["version"],
+            "sha256": profile_hash,
+            "expected_judge": f"{HOSTED_PROVIDER}/{hosted.expected_model}",
+            "output_cap_tokens": hosted.max_output_tokens,
+            "not_applicable": sorted(profile["not_applicable"]),
+        }
+        report["self_preference"] = _self_preference(inputs)
+    return report

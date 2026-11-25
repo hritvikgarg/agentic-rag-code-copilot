@@ -67,7 +67,7 @@ from copilot.evaluation.generation.execution import (
     settings_for,
 )
 from copilot.evaluation.generation.inventory import build_inventory
-from copilot.evaluation.generation.judge import JudgeCache, LLMJudge
+from copilot.evaluation.generation.judge import JUDGE_PROMPT_VERSION, JudgeCache, LLMJudge
 from copilot.evaluation.generation.judge_compare import compare_judgements
 from copilot.evaluation.generation.judge_compare import render_text as render_comparison
 from copilot.evaluation.generation.judge_controls import (
@@ -80,18 +80,25 @@ from copilot.evaluation.generation.judge_controls import (
     results_path,
     run_controls,
 )
-from copilot.evaluation.generation.judge_preflight import run_preflight
+from copilot.evaluation.generation.judge_preflight import (
+    hosted_call_budget,
+    run_hosted_preflight,
+    run_preflight,
+)
 from copilot.evaluation.generation.judge_selection import (
     JudgeSelection,
     check_judgements_dir,
     resolve_judge,
 )
 from copilot.evaluation.generation.judge_validation import (
+    HOSTED_PROFILE_PATH,
     VALIDATION_SPEC_PATH,
+    HostedContext,
     ValidationInputs,
     ValidationSpecError,
     evaluate_primary_audit,
     evaluate_validation,
+    load_hosted_profile,
     load_validation_spec,
     spec_sha256,
 )
@@ -123,7 +130,7 @@ from copilot.evaluation.generation.protocol import (
     protocol_hash,
 )
 from copilot.evaluation.generation.reference import build_reference
-from copilot.evaluation.generation.rubric import EvaluationError
+from copilot.evaluation.generation.rubric import RUBRIC_VERSION, EvaluationError
 from copilot.evaluation.generation.schema import (
     benchmark_digest,
     load_generation_benchmark,
@@ -528,15 +535,65 @@ def _cmd_judge_preflight(args: argparse.Namespace, settings: Settings) -> int:
     protocol = load_protocol(root / args.protocol)
     selection = _judge_selection(args, settings, protocol, root, None, need_directory=False)
     if not selection.local:
-        print("error: judge-preflight applies to a local judge (--judge-provider ollama)",
-              file=sys.stderr)  # fmt: skip
-        return 2
+        return _hosted_preflight(args, settings, protocol, root)
     llm = _judge_client(selection)
     result = run_preflight(
         llm, temperature=0.0, max_output_tokens=selection.max_output_tokens,
         expect_quantization=args.expect_quantization, require_gpu=args.require_gpu,
         warm_up=args.warm_up,
     )  # fmt: skip
+    print(json.dumps(result, indent=2))
+    for warning in result["warnings"]:
+        print(f"warning: {warning}", file=sys.stderr)
+    return 0 if result["ok"] else 3
+
+
+def _hosted_preflight(
+    args: argparse.Namespace, settings: Settings, stored: PrimaryProtocol, root: Path
+) -> int:
+    """Offline preflight for a hosted judge: validates the selection, makes no provider call."""
+    if (args.judge_provider or settings.llm_provider) != "gemini":
+        raise ValueError("a hosted judge preflight applies to --judge-provider gemini")
+    if args.expect_quantization or args.require_gpu or args.warm_up:
+        raise ValueError(
+            "--expect-quantization/--require-gpu/--warm-up apply to a local judge only"
+        )
+    protocol = _resolved(stored, args.confirm_model)
+    selection = _judge_selection(args, settings, protocol, root, None)
+    target = selection.judgements_dir.resolve()
+    primary = (root / DEFAULT_OUTPUT_DIR).resolve()
+    if target == primary or target.is_relative_to(primary):
+        raise ValueError("the judgements directory must not be inside the primary directory")
+    profile = load_hosted_profile(root / HOSTED_PROFILE_PATH, root / VALIDATION_SPEC_PATH)
+    controls = load_controls(root / CONTROLS_PATH)
+    questions, _ = _benchmarks(protocol, root, settings, [])
+    pilot_path = root / PILOT_SPEC_PATH
+    pilot_questions = load_pilot_spec(pilot_path).questions if pilot_path.is_file() else {}
+    budget = hosted_call_budget(
+        controls=len(controls.controls),
+        pilot_answers=2 * sum(len(ids) for ids in pilot_questions.values()),
+        primary_answers=2 * sum(len(q) for q in questions.values()),
+        max_attempts=args.retry_max_attempts,
+    )
+    generation = f"{protocol.llm_provider}/{protocol.llm_model}" if args.confirm_model else None
+    result = run_hosted_preflight(
+        provider=selection.provider,
+        judge_model=selection.model,
+        generation_model=generation,
+        api_key_present=settings.gemini_api_key is not None,
+        budget=budget,
+        judgements_dir=str(selection.judgements_dir.relative_to(root))
+        if selection.judgements_dir.is_relative_to(root)
+        else str(selection.judgements_dir),
+        cache_dir=str(selection.cache_dir) if selection.cache_dir is not None else None,
+        profile_version=profile["version"],
+        profile_sha256=spec_sha256(root / HOSTED_PROFILE_PATH),
+        spec_sha256=spec_sha256(root / VALIDATION_SPEC_PATH),
+        controls_sha256=controls_sha256(root / CONTROLS_PATH),
+        controls=len(controls.controls),
+        prompt_version=JUDGE_PROMPT_VERSION,
+        rubric_version=RUBRIC_VERSION,
+    )
     print(json.dumps(result, indent=2))
     for warning in result["warnings"]:
         print(f"warning: {warning}", file=sys.stderr)
@@ -595,6 +652,15 @@ def _cmd_judge_validate(args: argparse.Namespace, settings: Settings) -> int:
     protocol = load_protocol(root / args.protocol)
     spec = load_validation_spec(root / VALIDATION_SPEC_PATH)
     spec_hash = spec_sha256(root / VALIDATION_SPEC_PATH)
+    hosted: HostedContext | None = None
+    profile: dict | None = None
+    if args.judge_profile == "hosted":
+        if not args.expect_judge_model:
+            raise ValueError("--judge-profile hosted needs --expect-judge-model (the declared id)")
+        profile = load_hosted_profile(root / HOSTED_PROFILE_PATH, root / VALIDATION_SPEC_PATH)
+        hosted = HostedContext(args.expect_judge_model, protocol.judge.max_output_tokens)
+    elif args.expect_judge_model:
+        raise ValueError("--expect-judge-model applies to --judge-profile hosted only")
     inputs = ValidationInputs(
         controls_dir=args.controls_dir, controls_repeat_dir=args.controls_repeat_dir,
         pilot_dir=args.pilot_dir, pilot_repeat_dir=args.pilot_repeat_dir,
@@ -630,7 +696,10 @@ def _cmd_judge_validate(args: argparse.Namespace, settings: Settings) -> int:
     )  # fmt: skip
     if agreement_path is not None and agreement_path.is_file():
         inputs.agreement = json.loads(agreement_path.read_text(encoding="utf-8"))
-    report = evaluate_validation(spec, inputs, spec_hash)
+    report = evaluate_validation(
+        spec, inputs, spec_hash, hosted=hosted, profile=profile,
+        profile_hash=spec_sha256(root / HOSTED_PROFILE_PATH) if hosted else None,
+    )  # fmt: skip
     if args.primary_agreement:
         primary = json.loads(Path(args.primary_agreement).read_text(encoding="utf-8"))
         report["primary_audit"] = evaluate_primary_audit(spec, primary)
@@ -638,7 +707,11 @@ def _cmd_judge_validate(args: argparse.Namespace, settings: Settings) -> int:
     target = (
         Path(args.report)
         if args.report
-        else (root / anchor / "judge-validation-report.json" if anchor else None)
+        else (
+            root / anchor / f"judge-validation-report{'-hosted' if hosted else ''}.json"
+            if anchor
+            else None
+        )
     )  # noqa: E501
     text = json.dumps(report, indent=2, ensure_ascii=False)
     if target is not None:
@@ -983,10 +1056,17 @@ def _parser() -> argparse.ArgumentParser:
     judge_flags(judge)
     judge.add_argument("--confirm-model", help="the generation model (to resolve the protocol)")
 
-    preflight = sub.add_parser("judge-preflight", help="check the local judge runtime (no pull)")
+    preflight = sub.add_parser(
+        "judge-preflight",
+        help="local judge: check the runtime (no pull); hosted judge: offline checks, no call",
+    )
     common(preflight)
+    retry_flags(preflight)
     judge_flags(preflight)
-    preflight.add_argument("--confirm-model", help="unused; accepted for symmetry with judge")
+    preflight.add_argument(
+        "--confirm-model",
+        help="the generation model PROVIDER/MODEL (hosted: enables the self-preference check)",
+    )
     preflight.add_argument("--expect-quantization", help="e.g. Q4_K_M; exit 3 on a mismatch")
     preflight.add_argument("--require-gpu", action="store_true",
                            help="exit 3 unless the loaded model is fully GPU resident")  # fmt: skip
@@ -1015,6 +1095,14 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--primary-agreement", help="also apply the primary-audit criteria to "
                           "this audit-agree result")  # fmt: skip
     validate.add_argument("--report", help="where to write the report")
+    validate.add_argument(
+        "--judge-profile", choices=["local", "hosted"], default="local",
+        help="local = judge-validation-v1 as written; hosted = the same thresholds with the "
+        "judge identified by provider/model instead of a local runtime fingerprint",
+    )  # fmt: skip
+    validate.add_argument(
+        "--expect-judge-model", help="hosted profile: the judge model id you declared"
+    )
 
     compare = sub.add_parser("judge-compare", help="per-answer comparison of two judges (offline)")
     common(compare)
