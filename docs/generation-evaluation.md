@@ -14,7 +14,8 @@ better; the live comparison is Milestone 11B (commands at the end, **not execute
 | Held equal | same model and provider, temperature 0, `max_output_tokens` 8192, the question text (one benchmark field sent verbatim to both arms), the frozen repository |
 
 The agentic arm is **deferred** (not part of this experiment). The protocol is a versioned file,
-`generation-eval/protocol/primary-protocol.json`; its SHA-256 (which includes the confirmed model)
+`generation-eval/protocol/primary-protocol-v1.1.json` (see "Protocol v1.1 amendment" below; the
+original `primary-protocol.json` is kept unchanged); its SHA-256 (which includes the confirmed model)
 is stamped into every run, judgement and report, and a run can only resume under the same hash. The
 generation model is deliberately **not** in the committed file: `run` requires
 `--confirm-model PROVIDER/MODEL` and refuses a client that is not that model.
@@ -93,9 +94,33 @@ inside the retrieved evidence, overlapping the expected regions; `[Source n]` la
 applicable" for plain); `references.find_references` (conservative hallucinated-reference detector:
 verified / not_found / ambiguous / cannot_evaluate / ignored; hypothetical sentences and external
 dependencies are not flagged; inventory built with `ast` only, nothing is executed);
-`refusal.classify_response` and `abstention_metrics` (answered / insufficient_evidence /
-generic_refusal / ambiguous / no_response; appropriate-abstention, false-refusal, unsupported-answer
-rates).
+`refusal.classify_response` (cue patterns; a **diagnostic only**, see "Abstention classification")
+and `abstention_metrics` (answered / insufficient_evidence / generic_refusal / ambiguous /
+no_response / unrated; appropriate-abstention, false-refusal, unsupported-answer rates).
+
+### Abstention classification (exact definitions)
+
+Whether a response abstains is classified, in this order:
+
+1. **System abstention** (the RAG system stopped for lack of evidence; the model was never called):
+   `insufficient_evidence`, label source `system`, scored by rule.
+2. **Generated response with a valid judge rating** (judge prompt `gen-judge-2`): the label comes
+   from the judge's required, closed `response_type`: `answered`, `insufficient_evidence`,
+   `generic_refusal`, `mixed` (reported as `ambiguous`: part answer, part abstention) or
+   `ambiguous`. The judge must also give a consistent `abstained` flag (`true` exactly for
+   `insufficient_evidence`/`mixed`); an inconsistent output is a parse failure. `abstained=true`
+   alone is never read as an *appropriate* abstention.
+3. **Text but no valid judge rating** (judge failed, not run, or an older judge file without
+   `response_type`): `unrated`. It is counted and reported but excluded from every rate
+   denominator. The cue patterns are **never substituted**.
+4. **No text** (call failed, blocked, not attempted): `no_response`; a missing response is not a
+   refusal.
+
+The cue-pattern classifier is reported separately as `abstention_regex_diagnostic` with its
+disagreements against the judge, a confusion table, and the concordance counts with denominators
+(judge-classified responses only; system abstentions and unrated responses are not compared). It
+was widened to recognise phrasings such as "Nothing in the repository shows ...", "There is no
+mention of this in the code" and "The retrieved sources do not say", but remains a heuristic.
 
 ## The judge
 
@@ -115,14 +140,40 @@ a new version invalidates the cache). Their validity is checked, not assumed, by
 
 ## Human audit
 
-`audit-worksheet` draws a seeded sample (about 20%, stratified by repository x answerability, at
-least one per stratum) from questions **both arms answered with text** (a system abstention would
-reveal the arm), writes a blinded, shuffled worksheet (anonymous item ids, no arm or question id,
-`[Source n]` redacted, human fields empty) and a separate key. `audit-agree` compares a filled
-worksheet with the judge on the 0-2 correctness score (quadratic-weighted kappa), the abstention
-flag and per-key-fact "supported" (Cohen's kappa) and always reports raw agreement; kappa is `null`
-when a rater never varies (undefined). Partly filled rows are errors, not guesses. The audit shows
-how much to trust the judge; it does not make the judge a ground truth.
+**Eligibility and transparency.** A question can be audited only if both arms have model text and a
+valid judge rating. `audit-worksheet` classifies **every** benchmark question and writes
+`audit-population*.json`: total questions and responses, completed pairs, eligible and excluded
+pairs, exclusions by reason (generation failed / not attempted / no text / rule-scored system
+abstention / judge rating missing; primary counts add up to the excluded total), rule-scored system
+abstentions, failed and not-attempted responses, questions with missing judge ratings, the selected
+sample size, and the sample as a share of **both** the eligible pairs and the full benchmark. If no
+question is eligible the command exits 2 with that diagnostic and writes no worksheet.
+
+**Official vs provisional.** An official sample may be drawn only when the experiment is final: no
+side not attempted, a judgement file for every repository, and a valid judge rating for every
+auditable answer (generation failures that remain after retries are reported as exclusions, not
+blockers). Otherwise the command refuses, unless `--provisional` is given: the artifacts are then
+named `...-PROVISIONAL...` and every worksheet row carries `audit_status = PROVISIONAL`. Sampling is
+unchanged (seeded, stratified by repository x answerability, at least one per stratum, ~20%) and
+drawn from the eligible pairs; the worksheet is blinded and shuffled (anonymous item ids, no arm or
+question id, `[Source n]` redacted, human fields empty) with a separate key.
+
+**Judge vs human.** `audit-agree` compares a filled worksheet with the judge on the 0-2 correctness
+score (quadratic-weighted kappa and unweighted Cohen's kappa), the abstention flag and per-key-fact
+"supported", always with raw agreement; a kappa that is undefined is `null` with a stated reason.
+Every worksheet row is accounted for: eligible, unrated, invalid rating, duplicate id, unexpected id
+(including a rule-worksheet id), key item missing from the worksheet, missing/failed judge rating,
+or another named exclusion. Invalid, duplicate, unexpected or missing rows make the command exit 3
+(the report is still written); nothing is skipped silently. Partly filled rows are errors, not
+guesses.
+
+**Rule-scored system abstentions** are not judge ratings, so they are verified separately: the same
+command writes `audit-rule-worksheet*.csv` (ids `R-0001`, ...), a seeded stratified sample of the
+system abstentions with two yes/no fields (the message makes no repository claim; it is a genuine
+abstention), and `audit-rule-check` reports confirmed/disputed counts. This is a *rule-item
+verification*; it is never pooled with, or reported as, judge-human agreement.
+
+The audit shows how much to trust the judge; it does not make the judge a ground truth.
 
 ## Execution design (resume, caches, failure handling)
 
@@ -161,6 +212,64 @@ successful `rag-v1` sides.
   Otherwise none are. The other historical files (1024-token, quota-failed) have no reusable sides.
 * Reused sides are marked `origin="historical"`, carry no token counts, and are excluded from latency.
 
+## Groundedness: how to read it
+
+Groundedness is reported in two forms with denominators: **overall** (every scored response,
+including rule-scored system abstentions) and over **substantive generated answers** (judge-scored,
+not abstaining), plus the per-arm split into judge-scored, rule-scored and missing ratings. A
+rule-scored system abstention makes no claims, so it receives groundedness 2 by convention - on an
+answerable question it raises overall groundedness while its correctness is 0. Groundedness must
+therefore always be read with correctness, completeness and the false-refusal rate; a higher
+overall groundedness caused by abstaining is not a better answer.
+
+## Historical-response sensitivity
+
+The eight verified historical RAG responses (compatible Gemini configuration) stay in the primary
+analysis, marked `origin="historical"` (new responses are `origin="generated"`; cache hits
+`origin="cache"`), and are never regenerated, overwritten or modified. The report repeats the
+primary endpoint **excluding every question that has a reused side** and shows both results with
+their sample sizes, the number of excluded pairs and the bootstrap intervals. Two limits cannot be
+removed: the hosted model may have drifted since those responses were produced, and their packed
+prompt was not recorded in full (only the pinned prompt-template digests, the question, the index
+identity and the retrieved chunk ids are verified).
+
+## Secret gate and caches
+
+Every outbound request is scanned by the secret gate **before** any cache lookup and before any
+provider call: `LLMJudge.judge` scans before consulting the judge cache (a blocked input yields a
+failed record, zero provider calls and no cache entry, even if a stale or planted entry exists),
+`MeteredLLM.generate` scans before the generation cache (and the services additionally wrap the
+client in `GuardedLLMClient`), so a cache can never serve a response for input the gate would block.
+Blocked input is not persisted in any new artifact. Tests: `test_generation_cache_gate.py`.
+
+## Protocol v1.1 amendment
+
+`primary-protocol-v1.1.json` supersedes `primary-protocol.json` (v1, kept byte-for-byte; its SHA-256
+is pinned in `protocol.PROTOCOL_V1_FILE_SHA256` and tested). It carries an explicit `amendment`
+record. It was made **before any real generation call**, after the acceptance review found that the
+abstention and groundedness measures did not measure what their names suggest. Changed: judge
+prompt `gen-judge-1` -> `gen-judge-2` (adds `response_type`; rubric `gen-rubric-1` and its scoring
+are unchanged), the definitions of the abstention and groundedness secondary endpoints, a new
+historical-sensitivity endpoint, one new limitation, and the audit procedure above. Unchanged: arms,
+prompts and their pinned digests, retriever, top-k, temperature, token budget, repositories,
+benchmarks, key facts, the primary endpoint and bootstrap settings, audit fraction and seed.
+
+## Bounded pilot (isolated)
+
+`pilot-v1.json` records four predefined questions - one answerable and one unanswerable per
+repository - chosen by the smallest SHA-256 of `seed|repository|answerability|question id`. Only
+ids and the answerability flag are read; no historical answer quality, retrieval success, judge
+score or M10 outcome is used, and the ids were recorded before any live call. Selected:
+`copilot`: `impl-faiss-persist` (answerable), `u-uptime` (unanswerable); `inventory-orders`:
+`io-price-snapshot` (answerable), `io-u-payment` (unanswerable). The pilot uses the same resolved
+protocol (model, prompts, top-k, temperature, token budget), judge and rubric as the primary run,
+in its own directory (`data/generation-eval/pilot`), with runs stamped `scope=pilot` (primary and
+pilot commands refuse each other's files), no historical reuse, no import into the primary
+analysis, and reports named `report-PILOT*`. Upper bounds: 8 generation calls + 8 judge calls = 16
+provider calls before retries (RAG system abstentions and judge-cache hits only lower this). Retries
+stay bounded, the rate-limit breaker and model confirmation apply, and every request passes the
+secret gate. The pilot is **not executed** here; it is far too small for inference.
+
 ## Statistical analysis
 
 Primary endpoint (defined in the protocol before generation): the paired difference in mean key-fact
@@ -195,6 +304,15 @@ uv run --group ui pytest -q
 uv run python -m copilot.evaluation.generation plan --historical data/evaluation/compare-8192-4aaeab9c650ab76c.json
 ```
 
+**Pilot (NOT executed in 11A; run before the full experiment):**
+
+```powershell
+uv run python -m copilot.evaluation.generation plan --pilot --confirm-model gemini/<MODEL>
+uv run python -m copilot.evaluation.generation run --pilot --confirm-model gemini/<MODEL>
+uv run python -m copilot.evaluation.generation judge --pilot --confirm-model gemini/<MODEL> --judge-model <JUDGE_MODEL>
+uv run python -m copilot.evaluation.generation report --pilot
+```
+
 **Milestone 11B (NOT executed in 11A).** The inventory-orders index does not exist yet (the embedding
 model is not cached where 11A ran). Build it with the same defaults as the copilot index, then
 confirm its id is the one frozen in the protocol (`d115dc06e63659a2`); if it differs, stop and
@@ -215,6 +333,8 @@ uv run python -m copilot.evaluation.generation report
 uv run python -m copilot.evaluation.generation audit-worksheet
 # rate data/generation-eval/primary/audit-worksheet.csv without opening audit-key.json, then:
 uv run python -m copilot.evaluation.generation audit-agree --worksheet <filled.csv> --key data/generation-eval/primary/audit-key.json
+# verify the rule-scored system abstentions (if any were sampled):
+uv run python -m copilot.evaluation.generation audit-rule-check --worksheet <filled-rule.csv> --key data/generation-eval/primary/audit-rule-key.json
 ```
 
 `run` and `judge` are resumable (re-run the same command). Exit code 3 means the circuit breaker
