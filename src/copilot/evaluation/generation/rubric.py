@@ -56,7 +56,7 @@ class Assessment(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    evaluator_kind: Literal["judge", "human"]
+    evaluator_kind: Literal["judge", "human", "rule"]
     evaluator_id: str  # the judge model + prompt version, or the annotator's pseudonym
     fact_verdicts: dict[str, FactVerdict] = Field(default_factory=dict)
     material_unsupported_claims: tuple[str, ...] = ()
