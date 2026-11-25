@@ -7,11 +7,12 @@ passes the content-secret gate first. It contains no retrieval or RAG logic.
 
 | Piece | Role |
 |---|---|
-| `LLMClient` (Protocol) | `provider`, `model`, `generate(request) -> LLMResponse`. Small on purpose; only Gemini is implemented, so there is no registry or plug-in machinery. |
+| `LLMClient` (Protocol) | `provider`, `model`, `generate(request) -> LLMResponse`. Small on purpose; two providers exist (Gemini, Ollama), so there is still no registry or plug-in machinery. |
 | `LLMRequest` | Frozen model of *exactly* what leaves the machine: `system_instruction`, `user_prompt`, `temperature`, `max_output_tokens`, `prompt_version`. `outbound_text()` returns the sent text; `scan_targets()` returns the same two strings for the gate. The texts are excluded from `repr`. |
 | `LLMResponse` | `text` (never empty), `provider`, `model`, `finish_reason`, token usage (`prompt_tokens`, `completion_tokens`, `total_tokens`, `reasoning_tokens`), `latency_seconds`. No request text, no credentials. |
 | `FakeLLMClient` | Deterministic, offline; records every request in `.requests`. Used by all normal tests. |
 | `GeminiLLMClient` | The hosted client (official `google-genai` SDK). |
+| `OllamaLLMClient` | The local client (Milestone 11B): REST over `httpx`, loopback only. See [Provider: local Ollama](#provider-local-ollama-milestone-11b). |
 | `GuardedLLMClient` | Wraps any client; scans the exact outbound strings, then delegates. See below. |
 | `create_llm_client(settings)` | Builds the configured client **already wrapped in the guard**. |
 
@@ -48,6 +49,85 @@ against 2.24.0). The calls used were verified against the installed SDK, not ass
 
 The SDK is imported in `llm/gemini.py` only. `GeminiLLMClient(..., sdk_client=fake)` lets tests inject
 a fake SDK client, so no test needs the network.
+
+## Provider: local Ollama (Milestone 11B)
+
+Purpose: an **independent local judge** for the generation evaluation (different vendor and weights
+from the Gemini generator, no quota, no repository text leaving the machine). It is a provider on the
+same `LLMClient` protocol; nothing else in the stack changes. It was written and tested **offline
+only** (an `httpx.MockTransport` stands in for the server). Real Ollama behaviour - `done_reason`,
+token counts, `/api/ps` fields, GPU residency - is an assumption until you run the commands in
+[`docs/generation-evaluation.md`](generation-evaluation.md#local-ollama-judge-milestone-11b).
+
+### Call chain
+
+```
+judge CLI --judge-provider ollama
+  -> create_llm_client(settings)                      (factory builds OllamaLLMClient, wraps it)
+  -> GuardedLLMClient.generate(request)               (secret gate on the exact outbound text)
+  -> OllamaLLMClient.check_input_fits(request)        (conservative context pre-check)
+  -> POST http://localhost:11434/api/chat             (stream=false, format="json", explicit options)
+  -> _check_not_truncated(response)                   (done / done_reason / token-count validation)
+  -> LLMResponse
+```
+
+In `LLMJudge` the order is: build request -> input hash -> **secret gate** -> runtime identity
+(`/api/version`, `/api/tags`, `/api/show`) -> cache lookup (the fingerprint must match) -> guarded
+generate -> parse. Nothing is cached or sent before the gate has passed.
+
+### Endpoint security
+
+* Only `http`/`https`; no credentials, path, query or fragment in the URL; port 1-65535.
+* **Loopback only**: `localhost` or a loopback IP literal. Odd forms (`127.1`, decimal IPs) are
+  rejected. A remote host needs `COPILOT_OLLAMA_ALLOW_REMOTE=true` **and** `https`.
+* `httpx.Client(follow_redirects=False, trust_env=False)`: no redirect following and no proxy
+  environment variables, so a redirect cannot move the request off the loopback host. Any 3xx is
+  refused. An injected client must have both flags off.
+* Error messages are fixed strings (no URL, headers or body) and chained `from None`.
+* The model is **never pulled**. A missing model gives a configuration error that tells you to run
+  `ollama pull <tag>` yourself.
+
+### Context protection (nothing is silently shortened)
+
+Ollama truncates an over-long prompt to `num_ctx` *without an error*. A truncated judge prompt would
+silently lose the end of the answer or the rubric, so the client guards both sides:
+
+* **Before sending:** a deliberately pessimistic estimate `ceil(utf8_bytes / 2.0) + 64` must be
+  <= `num_ctx - max_output_tokens`, otherwise `LLMContextLimitError` is raised and **no request is
+  made**. The estimate is a heuristic upper bound, not a proof.
+* **After the response:** it is rejected if `done` is false, `done_reason` or either token count is
+  missing, `done_reason == "length"`, `prompt_eval_count` >= the input budget, `eval_count` >=
+  `num_predict`, or prompt + completion >= `num_ctx`.
+* A context failure is recorded as a **failed item** (never as a low score) and excluded from valid
+  counts.
+
+Remaining limitations: Ollama's prefix cache can lower `prompt_eval_count`, so the count is only a
+lower bound and does not by itself prove nothing was truncated; the client fails closed when counts
+are missing, which could reject a real response on a full prompt-cache hit (repeatability runs use
+`keep_alive 0` for this reason). A model swapped mid-process is only noticed by the next process.
+
+### Runtime fingerprint
+
+`RuntimeIdentity` = provider, model tag, **model digest**, quantization, parameter size, Ollama
+version, `num_ctx`, max output tokens, temperature, seed, structured-output mode. Its fingerprint is
+the SHA-256 of the canonical JSON. `keep_alive` is excluded (it changes speed, not output). The
+fingerprint is stored in each judgement record and file and is part of the judge cache key *only when
+it exists*, so **Gemini cache keys are unchanged** (golden-hash test). It identifies the runtime; it
+is not a claim of determinism.
+
+### Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `COPILOT_OLLAMA_BASE_URL` | `http://localhost:11434` | Loopback endpoint |
+| `COPILOT_OLLAMA_NUM_CTX` | `8192` | Context window requested per call |
+| `COPILOT_OLLAMA_SEED` | `20260` | Sampling seed |
+| `COPILOT_OLLAMA_KEEP_ALIVE` | `30m` | How long the model stays loaded |
+| `COPILOT_OLLAMA_ALLOW_REMOTE` | `false` | Allow a non-loopback `https` endpoint |
+
+Typed errors: 401/403 `LLMAuthenticationError`, 404 `LLMConfigurationError`, 429 `LLMRateLimitError`, 408/504
+`LLMTimeoutError`, 3xx `LLMProviderError` ("redirect refused"), context failures
+`LLMContextLimitError`, everything else `LLMProviderError`.
 
 ## Configuration
 
@@ -129,7 +209,7 @@ uv run pytest tests/integration/test_llm_live.py -v -s
 
 ## Limitations
 
-* One provider. Adding another means one new class implementing `LLMClient`; nothing else changes.
+* Two providers (Gemini, Ollama). Adding another means one new class implementing `LLMClient`; nothing else changes. The Ollama provider has never been run against a real server (see above).
 * No streaming, no response cache, no retry/backoff, no token-cost accounting beyond what the
   provider reports.
 * Latency and token counts come from the provider; they vary between runs.

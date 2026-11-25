@@ -76,7 +76,7 @@ The full design, technology decisions, milestones and evaluation plan are in
 | Semantic retrieval | Query embedding -> exact FAISS search -> verified source text (no LLM) | **Implemented (Milestone 5b)** |
 | Retrieval evaluation | Hit@k, MRR, mean lines per hit; JSONL benchmark; cap x representation matrix | **Implemented (Milestone 5b); benchmark is not independent** |
 | Secret scanner | Content scan (private keys, provider tokens, secret-like assignments) + fail-closed gate | **Implemented (Milestone 5c); wired in front of every hosted-LLM request (Milestone 6)** |
-| LLM | Gemini via `google-genai` (an Ollama fallback is not implemented) | **Implemented (Milestone 6)** |
+| LLM | Gemini via `google-genai`; local Ollama (loopback only, httpx) used as the independent evaluation judge | **Gemini implemented (Milestone 6); Ollama provider implemented and offline-tested (Milestone 11B), never run against a real Ollama yet** |
 | Interface | Streamlit over `CopilotService` | **Implemented (Milestone 7)** |
 | Orchestration | LangGraph 1.x | **Implemented (Milestone 8; offline-tested, quality not measured)** |
 | Parsing | Python `ast` for structure-aware chunking | **Implemented (Milestone 9; offline-tested, retrieval effect not measured)** |

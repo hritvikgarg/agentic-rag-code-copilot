@@ -270,6 +270,186 @@ provider calls before retries (RAG system abstentions and judge-cache hits only 
 stay bounded, the rate-limit breaker and model confirmation apply, and every request passes the
 secret gate. The pilot is **not executed** here; it is far too small for inference.
 
+## Local Ollama judge (Milestone 11B)
+
+**Status: implemented and tested offline only.** No model has been downloaded, no Ollama server has
+been contacted, and no judge result exists. Everything below that says "expected" is a design intent
+until you run the commands.
+
+### Configuration
+
+| Role | Provider / model | Settings |
+|---|---|---|
+| Generation (unchanged) | Gemini `gemini-3.6-flash`, `plain-v2` / `rag-v1`, temperature 0, max output 8192, top-k 5 | frozen protocol |
+| Judge (new, independent) | Ollama `llama3.1:8b` (expected Q4_K_M, **verified from runtime metadata, not assumed**) | `num_ctx` 8192, max judge output 1024, temperature 0, seed 20260, JSON mode, timeout 300 s, sequential |
+| Judge prompt / rubric (unchanged) | `gen-judge-2` / `gen-rubric-1` | |
+
+The judge is chosen on the command line (`--judge-provider ollama --judge-model llama3.1:8b`); the
+generation model and protocol are never changed. A local judge **requires its own
+`--judgements-dir`**, which may not be the generation output directory nor inside the primary or
+pilot directory, so a local judge can never overwrite or mix with the Gemini judge's artifacts.
+Judge cache: `<judgements-dir>/cache-judge` (or none with `--no-cache`).
+
+### Judge validation is predeclared
+
+`generation-eval/judge-validation/judge-validation-v1.json` was committed **before any execution**.
+Its thresholds are project-specific engineering thresholds for a small academic experiment, not
+literature standards; they cannot be changed after results are seen (a change needs `v2` and a new
+commit, and earlier results stay labelled with their version). `judge-validate` refuses results that
+were produced under a different spec hash.
+
+| Id | Criterion | Threshold |
+|---|---|---|
+| T1 | every pilot answer with model text has a successful judgement | 100% |
+| T2 | first-pass model controls that parse | >= 95% of 18 = **all 18** |
+| T3 | accepted judgements near the context/output limits | 0 |
+| T4 | planted synthetic secret blocked by the gate and absent from every artifact | 0 violations |
+| T5 | valid runtime fingerprint matching the declared judge (model, quantization, context, seed, JSON mode) | all files |
+| T6 | the repeat pass was independent (no cache, other directory, nothing reused) | yes |
+| S1 | pilot: exact agreement with the blinded human rating | >= 0.75 (expected n = 8) |
+| S2 | pilot: two-point disagreements | 0 |
+| S3 | confident-fabrication, contradicted-fact and invented-symbol controls all score 0 | 100% |
+| S4 | correct abstentions score 2 as abstaining; incorrect refusals score 0 as abstaining | 100% |
+| S5 | identical correctness score in two independent passes | >= 0.95 |
+| P1-P4 | **primary audit only**: exact agreement >= 0.75; quadratic-weighted kappa >= 0.60; two-point disagreements <= 5%; valid-judgement coverage >= 0.95 | evaluated once |
+
+Meeting T1-T6 and S1-S5 means "no pilot-level red flag"; it **does not validate the judge**. With
+eight pilot answers a kappa is deliberately not computed (`judge-compare` refuses below n = 30), and
+fewer than four rated answers is reported as inconclusive, never as a pass. An undefined kappa is
+"not met". If P1-P4 fail, every conclusion that depends on the local judge is labelled
+**EXPLORATORY**. Missing evidence is reported as `NOT_EVALUATED` / `INCOMPLETE`, never `PASS`.
+
+### Synthetic judge controls
+
+`generation-eval/judge-controls/controls-v1.json` holds 18 hand-written answers with expected
+outcome sets, written independently of any judge output on benchmark questions that are **not** in
+the pilot. Kinds: correct substantive, partially correct, confident fabrication, contradicted fact,
+correct abstention, incorrect refusal, generic refusal, mixed, invented path/symbol. Two further
+checks are not model controls: a malformed-structured-judgement parser control, and a security
+control whose fake token is assembled at run time (never stored in the repository). Controls live in
+their own namespace (`synthetic-judge-controls`) and **never enter primary or pilot metrics**.
+Offline tests prove the suite is meaningful: an oracle judge passes it, a careless judge fails it,
+and every expected outcome is consistent with the rubric.
+
+### Commands (native Windows PowerShell, from the project root)
+
+Ollama must be **running** for steps 1-8 (steps 4-8 load or call the model); steps 9-11 are offline
+(the table at the end of this section lists every command). `$J` is the local judge's private
+directory, outside the primary and pilot directories. Step 3 shows something only while the model
+is loaded, so run it again after step 4 if `ollama ps` is empty.
+
+```powershell
+$J = "data/judge-validation/llama3.1-8b"
+$GEN = "gemini/gemini-3.6-flash"
+```
+
+**1. Download the model** (~4.9 GB; this project never pulls for you):
+
+```powershell
+ollama pull llama3.1:8b
+```
+
+**2. Verify runtime metadata and digest** (record the digest; it is part of the fingerprint):
+
+```powershell
+ollama show llama3.1:8b
+(Invoke-RestMethod http://localhost:11434/api/version).version
+(Invoke-RestMethod http://localhost:11434/api/tags).models |
+  Where-Object { $_.name -eq "llama3.1:8b" } |
+  Select-Object name, digest, size, @{n="quantization";e={$_.details.quantization_level}}, @{n="parameters";e={$_.details.parameter_size}}
+```
+
+The quantization must read `Q4_K_M`. If it does not, stop: the validation spec names Q4_K_M.
+
+**3. Check GPU residency** (after the warm-up in step 4; `ollama ps` shows the loaded model):
+
+```powershell
+ollama ps
+nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv
+```
+
+`ollama ps` should read `100% GPU` for the 8192-token context on the 8 GB card. A CPU split still
+works but is slower; step 5 can enforce residency with `--require-gpu`.
+
+**4. Local warm-up** (constant prompt, no repository text; loads the model for 30 minutes):
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:11434/api/generate -ContentType "application/json" `
+  -Body '{"model":"llama3.1:8b","prompt":"Reply with the single word: ready","stream":false,"keep_alive":"30m","options":{"num_ctx":8192,"num_predict":8,"temperature":0}}' |
+  Select-Object response, done, done_reason
+```
+
+**5. Judge preflight** (endpoint, model presence, digest, quantization, residency; never pulls):
+
+```powershell
+uv run python -m copilot.evaluation.generation judge-preflight --judge-provider ollama --judge-model llama3.1:8b --expect-quantization Q4_K_M --warm-up --require-gpu
+```
+
+**6. Synthetic judge controls** (18 judge calls):
+
+```powershell
+uv run python -m copilot.evaluation.generation judge-controls --judge-provider ollama --judge-model llama3.1:8b --judgements-dir "$J/controls-1"
+```
+
+**7. Uncached repeatability checks** (no cache, model unloaded between requests; an independent
+second pass over the controls and over the pilot answers, each in its own new directory):
+
+```powershell
+uv run python -m copilot.evaluation.generation judge-controls --judge-provider ollama --judge-model llama3.1:8b --judgements-dir "$J/controls-2" --repeat
+uv run python -m copilot.evaluation.generation judge --pilot --confirm-model gemini/gemini-3.6-flash --judge-provider ollama --judge-model llama3.1:8b --judgements-dir "$J/pilot-repeat" --no-cache --judge-keep-alive 0
+```
+
+**8. Judge the existing four-question pilot** (the pilot's generated answers are read and never
+modified; judgements go to `$J/pilot`):
+
+```powershell
+uv run python -m copilot.evaluation.generation judge --pilot --confirm-model gemini/gemini-3.6-flash --judge-provider ollama --judge-model llama3.1:8b --judgements-dir "$J/pilot"
+```
+
+**9. Blinded pilot human worksheet** (offline; drawn from the generated answers only, **no judgement
+file is read**, so it can be created before judging; rate it without opening the key):
+
+```powershell
+uv run python -m copilot.evaluation.generation audit-worksheet --pilot
+# rate data/generation-eval/pilot/audit-worksheet-PILOT.csv; do not open audit-key-PILOT.json
+```
+
+**10. Import the human ratings and compute agreement** (offline):
+
+```powershell
+uv run python -m copilot.evaluation.generation audit-agree --pilot --worksheet <filled-worksheet.csv> --key data/generation-eval/pilot/audit-key-PILOT.json --judgements-dir "$J/pilot"
+```
+
+**11. Pilot report and validation verdict** (offline):
+
+```powershell
+uv run python -m copilot.evaluation.generation report --pilot --judgements-dir "$J/pilot"
+uv run python -m copilot.evaluation.generation judge-validate --controls-dir "$J/controls-1" --controls-repeat-dir "$J/controls-2" --pilot-dir "$J/pilot" --pilot-repeat-dir "$J/pilot-repeat"
+```
+
+`judge-validate` exit codes: 0 criteria met, 3 a criterion failed, 4 incomplete evidence.
+Optionally compare with a Gemini-judged pilot, if one exists in the pilot directory (offline):
+`judge-compare --pilot --dir-b "$J/pilot"`.
+
+**12. Resume an interrupted local judge run:** re-run the identical command (same
+`--judgements-dir`, model and flags). Judged items are kept; failed and missing items are retried.
+The resume check refuses a changed model digest, quantization, context size, seed or spec hash
+instead of mixing runtimes. Do not delete the directory.
+
+| Needs a running Ollama | Works with Ollama stopped |
+|---|---|
+| `judge-preflight`, `judge-controls` (both passes), `judge --judge-provider ollama` (steps 5-8) | `report`, `judge-compare`, `audit-worksheet`, `audit-agree`, `judge-validate`, `plan` |
+
+Notes: avoid other GPU-heavy work during judging on the 8 GB card. The local judge never writes into
+the primary or pilot directories. Hosted Gemini judging and its caches are untouched.
+
+### What this does not establish
+
+A passing pilot-level validation shows only that the local judge is parseable, safe, repeatable and
+not obviously careless. It does not show that it agrees with humans at the primary scale; that is
+decided only by P1-P4 on the primary audit. The estimator and token-count checks reduce but do not
+eliminate the chance of silent truncation (see `docs/llm.md`).
+
 ## Statistical analysis
 
 Primary endpoint (defined in the protocol before generation): the paired difference in mean key-fact
