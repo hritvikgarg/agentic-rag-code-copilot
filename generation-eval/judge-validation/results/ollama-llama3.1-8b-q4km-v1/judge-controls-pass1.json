@@ -1,0 +1,1041 @@
+{
+  "schema_version": "judge-controls-results/1",
+  "namespace": "synthetic-judge-controls",
+  "pass_label": "pass1",
+  "controls_version": "controls-v1",
+  "controls_sha256": "c6e18e96f5c5acedb0b08d4f9a7a7dd25977f1b5a6393d5d8de945abd90d6476",
+  "validation_spec_sha256": "aa8af417b0eceb0347abebdb3fefa9ca833f7e737521e3f0511f002f049aa81a",
+  "judge_provider": "ollama",
+  "judge_model": "llama3.1:8b",
+  "judge_prompt_version": "gen-judge-2",
+  "rubric_version": "gen-rubric-1",
+  "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8",
+  "runtime": {
+    "provider": "ollama",
+    "model_tag": "llama3.1:8b",
+    "model_digest": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e",
+    "quantization": "Q4_K_M",
+    "parameter_size": "8.0B",
+    "runtime_version": "0.40.18",
+    "context_size": 8192,
+    "max_output_tokens": 1024,
+    "temperature": 0.0,
+    "seed": 20260,
+    "structured_output": "json"
+  },
+  "cache_used": true,
+  "cache_hits": 0,
+  "test_artifact": false,
+  "results": [
+    {
+      "control_id": "ctl-io-01",
+      "kind": "correct_substantive",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "state": "judged",
+      "score": 2,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "supported",
+        "f2": "supported",
+        "f3": "supported"
+      },
+      "unsupported_claims": 0,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": true,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "io-discount-tiers",
+        "blind_id": "ctl-io-01",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "cc7a45dc2ec2d0eae7be5f24a1bdd129b6f34d8bc3225e4344be0b1158f7eae0",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "supported",
+            "f2": "supported",
+            "f3": "supported"
+          },
+          "material_unsupported_claims": [],
+          "groundedness": 2,
+          "abstained": false,
+          "notes": "",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"supported\",\n    \"f2\": \"supported\",\n    \"f3\": \"supported\"\n  },\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 2,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"\"\n}",
+        "prompt_tokens": 1191,
+        "completion_tokens": 76,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-io-02",
+      "kind": "partially_correct",
+      "repository_id": "inventory-orders",
+      "question_id": "io-cancel",
+      "state": "judged",
+      "score": 2,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "supported",
+        "f2": "supported",
+        "f3": "supported"
+      },
+      "unsupported_claims": 0,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": false,
+        "unsupported_claims": true,
+        "correctness_score": false
+      },
+      "passed": false,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "io-cancel",
+        "blind_id": "ctl-io-02",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "c8eb8a583bae38e38599a99e0e39b6fc619e616ffc7c7e8a2a9ee81dc1c98f77",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "supported",
+            "f2": "supported",
+            "f3": "supported"
+          },
+          "material_unsupported_claims": [],
+          "groundedness": 2,
+          "abstained": false,
+          "notes": "",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"supported\",\n    \"f2\": \"supported\",\n    \"f3\": \"supported\"\n  },\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 2,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"\"\n}",
+        "prompt_tokens": 1061,
+        "completion_tokens": 76,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-io-03",
+      "kind": "confident_fabrication",
+      "repository_id": "inventory-orders",
+      "question_id": "io-tax",
+      "state": "judged",
+      "score": 0,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "contradicted",
+        "f2": "contradicted",
+        "f3": "missing"
+      },
+      "unsupported_claims": 5,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": true,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "io-tax",
+        "blind_id": "ctl-io-03",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "9f58f98cd7d75d55d38ed3ed0b8329055a3283b27e61d998b70d6c09c3604842",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "contradicted",
+            "f2": "contradicted",
+            "f3": "missing"
+          },
+          "material_unsupported_claims": [
+            "Tax is calculated line by line.",
+            "For every order line the code looks up the customer's regional rate in a tax table keyed by ZIP code through TaxService.lookup_rate in src/invorders/services/tax.py",
+            "applies it to the line amount including its share of shipping",
+            "rounds each line to the nearest cent",
+            "The per-line amounts are summed to give the order's tax"
+          ],
+          "groundedness": 0,
+          "abstained": false,
+          "notes": "The answer contradicts key facts f1, f2, and does not mention key fact f3.",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"contradicted\",\n    \"f2\": \"contradicted\",\n    \"f3\": \"missing\"\n  },\n  \"material_unsupported_claims\": [\n    \"Tax is calculated line by line.\",\n    \"For every order line the code looks up the customer's regional rate in a tax table keyed by ZIP code through TaxService.lookup_rate in src/invorders/services/tax.py\",\n    \"applies it to the line amount including its share of shipping\",\n    \"rounds each line to the nearest cent\",\n    \"The per-line amounts are summed to give the order's tax\"\n  ],\n  \"groundedness\": 0,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"The answer contradicts key facts f1, f2, and does not mention key fact f3.\"\n}",
+        "prompt_tokens": 1038,
+        "completion_tokens": 191,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-io-04",
+      "kind": "contradicted_fact",
+      "repository_id": "inventory-orders",
+      "question_id": "io-status-machine",
+      "state": "judged",
+      "score": 1,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "supported",
+        "f2": "contradicted",
+        "f3": "missing",
+        "f4": "missing"
+      },
+      "unsupported_claims": 2,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": false,
+        "unsupported_claims": true,
+        "correctness_score": false
+      },
+      "passed": false,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "io-status-machine",
+        "blind_id": "ctl-io-04",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "f98827b98993d1b92f6d55408f36ac24b9f54b505e8d856ea0ba3188f03e98d8",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "supported",
+            "f2": "contradicted",
+            "f3": "missing",
+            "f4": "missing"
+          },
+          "material_unsupported_claims": [
+            "A shipped order can be sent back to placed if it is returned",
+            "an attempt at any other change is quietly ignored without an error"
+          ],
+          "groundedness": 0,
+          "abstained": false,
+          "notes": "The answer contradicts key fact f2 and does not mention key fact f3 or f4.",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"supported\",\n    \"f2\": \"contradicted\",\n    \"f3\": \"missing\",\n    \"f4\": \"missing\"\n  },\n  \"material_unsupported_claims\": [\n    \"A shipped order can be sent back to placed if it is returned\",\n    \"an attempt at any other change is quietly ignored without an error\"\n  ],\n  \"groundedness\": 0,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"The answer contradicts key fact f2 and does not mention key fact f3 or f4.\"\n}",
+        "prompt_tokens": 987,
+        "completion_tokens": 139,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-io-05",
+      "kind": "correct_abstention",
+      "repository_id": "inventory-orders",
+      "question_id": "io-u-throughput",
+      "state": "judged",
+      "score": 2,
+      "response_type": "insufficient_evidence",
+      "abstained": true,
+      "fact_verdicts": {},
+      "unsupported_claims": 0,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": true,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "io-u-throughput",
+        "blind_id": "ctl-io-05",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "7b5b1a4454077148198608fa8d47bf1d7226e263fd65cf6f48300dec72521bb3",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {},
+          "material_unsupported_claims": [],
+          "groundedness": 2,
+          "abstained": true,
+          "notes": "Answer correctly states that the repository lacks the information and does not invent a value.",
+          "response_type": "insufficient_evidence"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {},\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 2,\n  \"abstained\": true,\n  \"response_type\": \"insufficient_evidence\",\n  \"notes\": \"Answer correctly states that the repository lacks the information and does not invent a value.\"\n}",
+        "prompt_tokens": 726,
+        "completion_tokens": 69,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-io-06",
+      "kind": "incorrect_refusal",
+      "repository_id": "inventory-orders",
+      "question_id": "io-reserve",
+      "state": "judged",
+      "score": 0,
+      "response_type": "insufficient_evidence",
+      "abstained": true,
+      "fact_verdicts": {
+        "f1": "missing",
+        "f2": "missing",
+        "f3": "missing"
+      },
+      "unsupported_claims": 0,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": true,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "io-reserve",
+        "blind_id": "ctl-io-06",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "2f6f621589e0c71a1a0fb3f570620700175ec5e8a3f21fe0d0ab835bac4f16a2",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "missing",
+            "f2": "missing",
+            "f3": "missing"
+          },
+          "material_unsupported_claims": [],
+          "groundedness": 0,
+          "abstained": true,
+          "notes": "The answer correctly states that there is insufficient evidence to explain what InventoryService.reserve does or when it fails.",
+          "response_type": "insufficient_evidence"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"missing\",\n    \"f2\": \"missing\",\n    \"f3\": \"missing\"\n  },\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 0,\n  \"abstained\": true,\n  \"response_type\": \"insufficient_evidence\",\n  \"notes\": \"The answer correctly states that there is insufficient evidence to explain what InventoryService.reserve does or when it fails.\"\n}",
+        "prompt_tokens": 965,
+        "completion_tokens": 100,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-io-07",
+      "kind": "generic_refusal",
+      "repository_id": "inventory-orders",
+      "question_id": "io-ship",
+      "state": "failed",
+      "score": null,
+      "response_type": null,
+      "abstained": null,
+      "fact_verdicts": {},
+      "unsupported_claims": null,
+      "checks": {},
+      "passed": false,
+      "reused": false,
+      "error": "invalid judge output: EvaluationError: io-ship: verdicts cover [], key facts are ['f1', 'f2', 'f3', 'f4']",
+      "record": {
+        "state": "failed",
+        "question_id": "io-ship",
+        "blind_id": "ctl-io-07",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "0158cafecb8ab636af007bddff992a7681e7ef7a65d01f1f98159eb0ecfd897a",
+        "assessment": null,
+        "error": "invalid judge output: EvaluationError: io-ship: verdicts cover [], key facts are ['f1', 'f2', 'f3', 'f4']",
+        "raw_output": "{\"fact_verdicts\": {}, \"material_unsupported_claims\": [], \"groundedness\": 0, \"abstained\": true, \"response_type\": \"insufficient_evidence\", \"notes\": \"The answer admits that it cannot answer the question.\"}",
+        "prompt_tokens": 1125,
+        "completion_tokens": 56,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-io-08",
+      "kind": "mixed_answer_and_abstention",
+      "repository_id": "inventory-orders",
+      "question_id": "io-low-stock",
+      "state": "judged",
+      "score": 1,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "supported",
+        "f2": "missing",
+        "f3": "missing"
+      },
+      "unsupported_claims": 0,
+      "checks": {
+        "response_type": false,
+        "abstained": false,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": false,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "io-low-stock",
+        "blind_id": "ctl-io-08",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "4b5eb816c20b669aa07bdee19c97de44bf0bcdeb7645a4c5ce1096592f7f606b",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "supported",
+            "f2": "missing",
+            "f3": "missing"
+          },
+          "material_unsupported_claims": [],
+          "groundedness": 1,
+          "abstained": false,
+          "notes": "The answer correctly describes low_stock_skus, but fails to mention the report ordering.",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"supported\",\n    \"f2\": \"missing\",\n    \"f3\": \"missing\"\n  },\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 1,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"The answer correctly describes low_stock_skus, but fails to mention the report ordering.\"\n}",
+        "prompt_tokens": 989,
+        "completion_tokens": 93,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-io-09",
+      "kind": "invented_symbol",
+      "repository_id": "inventory-orders",
+      "question_id": "io-u-email",
+      "state": "judged",
+      "score": 1,
+      "response_type": "insufficient_evidence",
+      "abstained": true,
+      "fact_verdicts": {},
+      "unsupported_claims": 2,
+      "checks": {
+        "response_type": false,
+        "abstained": false,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": false
+      },
+      "passed": false,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "io-u-email",
+        "blind_id": "ctl-io-09",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "2e96288668f88464414e347f70c39faedc1d4efdaa184c1adb227fe2a1b00d48",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {},
+          "material_unsupported_claims": [
+            "SmtpMailer class in src/invorders/notifications/mailer.py",
+            "SMTP_HOST setting"
+          ],
+          "groundedness": 0,
+          "abstained": true,
+          "notes": "Answer invents repository-specific content despite the reference stating that the repository evidence does not show the requested information.",
+          "response_type": "insufficient_evidence"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {},\n  \"material_unsupported_claims\": [\"SmtpMailer class in src/invorders/notifications/mailer.py\", \"SMTP_HOST setting\"],\n  \"groundedness\": 0,\n  \"abstained\": true,\n  \"response_type\": \"insufficient_evidence\",\n  \"notes\": \"Answer invents repository-specific content despite the reference stating that the repository evidence does not show the requested information.\"\n}",
+        "prompt_tokens": 741,
+        "completion_tokens": 94,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-cp-01",
+      "kind": "correct_substantive",
+      "repository_id": "copilot",
+      "question_id": "impl-chunk-id",
+      "state": "judged",
+      "score": 2,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "supported",
+        "f2": "supported",
+        "f3": "supported"
+      },
+      "unsupported_claims": 0,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": true,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "impl-chunk-id",
+        "blind_id": "ctl-cp-01",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "2d86d49789a3887142cf4185f2974ed496e85775dfff99f49c92f7a2adbe2008",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "supported",
+            "f2": "supported",
+            "f3": "supported"
+          },
+          "material_unsupported_claims": [],
+          "groundedness": 2,
+          "abstained": false,
+          "notes": "The answer accurately describes the chunk ID generation process.",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"supported\",\n    \"f2\": \"supported\",\n    \"f3\": \"supported\"\n  },\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 2,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"The answer accurately describes the chunk ID generation process.\"\n}",
+        "prompt_tokens": 1303,
+        "completion_tokens": 86,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-cp-02",
+      "kind": "partially_correct",
+      "repository_id": "copilot",
+      "question_id": "impl-embed-config",
+      "state": "judged",
+      "score": 2,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "supported",
+        "f2": "supported",
+        "f3": "supported"
+      },
+      "unsupported_claims": 0,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": false,
+        "unsupported_claims": true,
+        "correctness_score": false
+      },
+      "passed": false,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "impl-embed-config",
+        "blind_id": "ctl-cp-02",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "7f1a7e8db2e69e9fb4528118eb484ab6a3237c90f639315a9f0e1c9182df866f",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "supported",
+            "f2": "supported",
+            "f3": "supported"
+          },
+          "material_unsupported_claims": [],
+          "groundedness": 2,
+          "abstained": false,
+          "notes": "",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"supported\",\n    \"f2\": \"supported\",\n    \"f3\": \"supported\"\n  },\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 2,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"\"\n}",
+        "prompt_tokens": 999,
+        "completion_tokens": 76,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-cp-03",
+      "kind": "confident_fabrication",
+      "repository_id": "copilot",
+      "question_id": "impl-logging",
+      "state": "judged",
+      "score": 0,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "contradicted",
+        "f2": "missing",
+        "f3": "contradicted"
+      },
+      "unsupported_claims": 4,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": true,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "impl-logging",
+        "blind_id": "ctl-cp-03",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "b81b8160d9fe6b4e2e751c1a9479b989f1fa043d54c4682f7489ffeba87b9916",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "contradicted",
+            "f2": "missing",
+            "f3": "contradicted"
+          },
+          "material_unsupported_claims": [
+            "Logging is set up by a LoggerFactory class in src/copilot/utils/log_config.py.",
+            "It reads a logging.yaml file,",
+            "It attaches a rotating file handler that writes JSON lines to logs/copilot.log",
+            "It takes the level from the COPILOT_LOG_MODE environment variable."
+          ],
+          "groundedness": 0,
+          "abstained": false,
+          "notes": "The answer contradicts key facts f1, f3 and misses key fact f2.",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"contradicted\",\n    \"f2\": \"missing\",\n    \"f3\": \"contradicted\"\n  },\n  \"material_unsupported_claims\": [\n    \"Logging is set up by a LoggerFactory class in src/copilot/utils/log_config.py.\",\n    \"It reads a logging.yaml file,\",\n    \"It attaches a rotating file handler that writes JSON lines to logs/copilot.log\",\n    \"It takes the level from the COPILOT_LOG_MODE environment variable.\"\n  ],\n  \"groundedness\": 0,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"The answer contradicts key facts f1, f3 and misses key fact f2.\"\n}",
+        "prompt_tokens": 1065,
+        "completion_tokens": 163,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-cp-04",
+      "kind": "contradicted_fact",
+      "repository_id": "copilot",
+      "question_id": "impl-symlinks",
+      "state": "judged",
+      "score": 0,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "contradicted",
+        "f2": "contradicted"
+      },
+      "unsupported_claims": 2,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": true,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "impl-symlinks",
+        "blind_id": "ctl-cp-04",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "6e13e0dc1e8af461fbe29e5e93de31b43de65f2dddd53dec158178207d0a97c0",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "contradicted",
+            "f2": "contradicted"
+          },
+          "material_unsupported_claims": [
+            "a linked file is indexed just like a normal file",
+            "If a link points outside the repository it is silently ignored and nothing is reported about it"
+          ],
+          "groundedness": 0,
+          "abstained": false,
+          "notes": "The answer contradicts the reference material on how symbolic links are handled during file discovery.",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"contradicted\",\n    \"f2\": \"contradicted\"\n  },\n  \"material_unsupported_claims\": [\n    \"a linked file is indexed just like a normal file\",\n    \"If a link points outside the repository it is silently ignored and nothing is reported about it\"\n  ],\n  \"groundedness\": 0,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"The answer contradicts the reference material on how symbolic links are handled during file discovery.\"\n}",
+        "prompt_tokens": 945,
+        "completion_tokens": 124,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-cp-05",
+      "kind": "correct_abstention",
+      "repository_id": "copilot",
+      "question_id": "u-monitoring",
+      "state": "judged",
+      "score": 2,
+      "response_type": "insufficient_evidence",
+      "abstained": true,
+      "fact_verdicts": {},
+      "unsupported_claims": 0,
+      "checks": {
+        "response_type": true,
+        "abstained": true,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": true,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "u-monitoring",
+        "blind_id": "ctl-cp-05",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "39453c8b54cf9c795c31c89c99ac9bf6a9bae9b3828027a111b7d909db4ce990",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {},
+          "material_unsupported_claims": [],
+          "groundedness": 2,
+          "abstained": true,
+          "notes": "Answer correctly states that the repository evidence does not show the requested information.",
+          "response_type": "insufficient_evidence"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {},\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 2,\n  \"abstained\": true,\n  \"response_type\": \"insufficient_evidence\",\n  \"notes\": \"Answer correctly states that the repository evidence does not show the requested information.\"\n}",
+        "prompt_tokens": 727,
+        "completion_tokens": 67,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-cp-06",
+      "kind": "incorrect_refusal",
+      "repository_id": "copilot",
+      "question_id": "impl-index-id",
+      "state": "failed",
+      "score": null,
+      "response_type": null,
+      "abstained": null,
+      "fact_verdicts": {},
+      "unsupported_claims": null,
+      "checks": {},
+      "passed": false,
+      "reused": false,
+      "error": "invalid judge output: EvaluationError: impl-index-id: verdicts cover [], key facts are ['f1', 'f2']",
+      "record": {
+        "state": "failed",
+        "question_id": "impl-index-id",
+        "blind_id": "ctl-cp-06",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "ead44f6662e4cc33428183ebcad2e28bd1f1048cbc9187bd00b69d6ba434d6b4",
+        "assessment": null,
+        "error": "invalid judge output: EvaluationError: impl-index-id: verdicts cover [], key facts are ['f1', 'f2']",
+        "raw_output": "{\n  \"fact_verdicts\": {},\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 0,\n  \"abstained\": true,\n  \"response_type\": \"insufficient_evidence\",\n  \"notes\": \"The answer correctly states that the repository evidence is insufficient to answer the question.\"\n}",
+        "prompt_tokens": 901,
+        "completion_tokens": 68,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-cp-07",
+      "kind": "generic_refusal",
+      "repository_id": "copilot",
+      "question_id": "impl-newlines",
+      "state": "failed",
+      "score": null,
+      "response_type": null,
+      "abstained": null,
+      "fact_verdicts": {},
+      "unsupported_claims": null,
+      "checks": {},
+      "passed": false,
+      "reused": false,
+      "error": "invalid judge output: EvaluationError: impl-newlines: verdicts cover [], key facts are ['f1', 'f2']",
+      "record": {
+        "state": "failed",
+        "question_id": "impl-newlines",
+        "blind_id": "ctl-cp-07",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "debf5f2ce7af3905d1d67802f8124dea7047bcd71080beb15378ce60f6d51008",
+        "assessment": null,
+        "error": "invalid judge output: EvaluationError: impl-newlines: verdicts cover [], key facts are ['f1', 'f2']",
+        "raw_output": "{\n  \"fact_verdicts\": {},\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 0,\n  \"abstained\": true,\n  \"response_type\": \"insufficient_evidence\",\n  \"notes\": \"The answer admits that the repository does not show the information.\"\n}",
+        "prompt_tokens": 822,
+        "completion_tokens": 65,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-cp-08",
+      "kind": "mixed_answer_and_abstention",
+      "repository_id": "copilot",
+      "question_id": "impl-fake-embedder",
+      "state": "judged",
+      "score": 2,
+      "response_type": "answered",
+      "abstained": false,
+      "fact_verdicts": {
+        "f1": "supported",
+        "f2": "supported",
+        "f3": "supported"
+      },
+      "unsupported_claims": 0,
+      "checks": {
+        "response_type": false,
+        "abstained": false,
+        "fact_verdicts": false,
+        "unsupported_claims": true,
+        "correctness_score": false
+      },
+      "passed": false,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "impl-fake-embedder",
+        "blind_id": "ctl-cp-08",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "b9f7f1c2483e7780086066419e7cb2b0632c9191c1b29bd408bb59295103e373",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {
+            "f1": "supported",
+            "f2": "supported",
+            "f3": "supported"
+          },
+          "material_unsupported_claims": [],
+          "groundedness": 2,
+          "abstained": false,
+          "notes": "",
+          "response_type": "answered"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {\n    \"f1\": \"supported\",\n    \"f2\": \"supported\",\n    \"f3\": \"supported\"\n  },\n  \"material_unsupported_claims\": [],\n  \"groundedness\": 2,\n  \"abstained\": false,\n  \"response_type\": \"answered\",\n  \"notes\": \"\"\n}",
+        "prompt_tokens": 1233,
+        "completion_tokens": 76,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    },
+    {
+      "control_id": "ctl-cp-09",
+      "kind": "invented_symbol",
+      "repository_id": "copilot",
+      "question_id": "u-secrets-manager",
+      "state": "judged",
+      "score": 0,
+      "response_type": "generic_refusal",
+      "abstained": false,
+      "fact_verdicts": {},
+      "unsupported_claims": 2,
+      "checks": {
+        "response_type": false,
+        "abstained": true,
+        "fact_verdicts": true,
+        "unsupported_claims": true,
+        "correctness_score": true
+      },
+      "passed": false,
+      "reused": false,
+      "error": null,
+      "record": {
+        "state": "successful",
+        "question_id": "u-secrets-manager",
+        "blind_id": "ctl-cp-09",
+        "judge_provider": "ollama",
+        "judge_model": "llama3.1:8b",
+        "prompt_version": "gen-judge-2",
+        "rubric_version": "gen-rubric-1",
+        "input_sha256": "a620881a14cb8554af4b55ce3c81a14217df24ef9927aa1b7cd38d5e51334598",
+        "assessment": {
+          "evaluator_kind": "judge",
+          "evaluator_id": "ollama/llama3.1:8b/gen-judge-2",
+          "fact_verdicts": {},
+          "material_unsupported_claims": [
+            "The Gemini API key is fetched by the load_secret() function in src/copilot/config/vault.py.",
+            "HashiCorp Vault is used to store the Gemini API key."
+          ],
+          "groundedness": 0,
+          "abstained": false,
+          "notes": "The answer invents a function and a file that are not supported by the reference, and contradicts the reference by stating that the repository contains secrets manager integration.",
+          "response_type": "generic_refusal"
+        },
+        "error": null,
+        "raw_output": "{\n  \"fact_verdicts\": {},\n  \"material_unsupported_claims\": [\"The Gemini API key is fetched by the load_secret() function in src/copilot/config/vault.py.\", \"HashiCorp Vault is used to store the Gemini API key.\"],\n  \"groundedness\": 0,\n  \"abstained\": false,\n  \"response_type\": \"generic_refusal\",\n  \"notes\": \"The answer invents a function and a file that are not supported by the reference, and contradicts the reference by stating that the repository contains secrets manager integration.\"\n}",
+        "prompt_tokens": 749,
+        "completion_tokens": 120,
+        "reasoning_tokens": null,
+        "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+      }
+    }
+  ],
+  "parser_results": [
+    {
+      "control_id": "ctl-parse-01",
+      "kind": "prose_instead_of_json",
+      "expected": "reject",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "control_id": "ctl-parse-02",
+      "kind": "truncated_json",
+      "expected": "reject",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "control_id": "ctl-parse-03",
+      "kind": "unknown_and_missing_fact_ids",
+      "expected": "reject",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "control_id": "ctl-parse-04",
+      "kind": "missing_response_type",
+      "expected": "reject",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "control_id": "ctl-parse-05",
+      "kind": "response_type_contradicts_abstained",
+      "expected": "reject",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "control_id": "ctl-parse-06",
+      "kind": "groundedness_out_of_range",
+      "expected": "reject",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "control_id": "ctl-parse-07",
+      "kind": "unexpected_extra_field",
+      "expected": "reject",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "control_id": "ctl-parse-08",
+      "kind": "invalid_verdict_value",
+      "expected": "reject",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "control_id": "ctl-parse-09",
+      "kind": "valid_fenced_json",
+      "expected": "accept",
+      "outcome": "accepted",
+      "passed": true
+    },
+    {
+      "control_id": "ctl-parse-10",
+      "kind": "valid_plain_json",
+      "expected": "accept",
+      "outcome": "accepted",
+      "passed": true
+    }
+  ],
+  "security_result": {
+    "control_id": "ctl-sec-01",
+    "state": "failed",
+    "error": "RepositorySecretRiskError: Repository context REFUSED for external LLM use: 1 potential secret(s) in 1 file(s) (rules: github-token=1). Findings: llm-request/user-prompt.txt:37 [github-token]. Remove the secrets (and rotate any real credential that was committed) or leave the affected files out of t",
+    "gate_fired": true,
+    "secret_in_artifact": false,
+    "passed": true
+  }
+}

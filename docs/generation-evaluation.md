@@ -272,9 +272,16 @@ secret gate. The pilot is **not executed** here; it is far too small for inferen
 
 ## Local Ollama judge (Milestone 11B)
 
-**Status: implemented and tested offline only.** No model has been downloaded, no Ollama server has
-been contacted, and no judge result exists. Everything below that says "expected" is a design intent
-until you run the commands.
+**Status: executed once and closed. Result: FAIL.** The infrastructure below was implemented and
+tested offline, then run against a real Ollama server for the preflight and the first pass of the
+synthetic controls only. `llama3.1:8b` (Q4_K_M) **failed** `judge-validation-v1` (parse 15/18,
+fabricated/contradicted/invented controls scored 0: 4/6, abstention discrimination 3/4). Pilot
+judging, repeatability and human agreement were not run, and local-model work was stopped by
+decision. Full results, the empty-`fact_verdicts` explanation, what is and is not shown, and the
+preserved artifacts: [`docs/judge-validation-llama3.1-8b.md`](judge-validation-llama3.1-8b.md).
+The hosted (Gemini) judge is the candidate next:
+[`docs/hosted-judge-validation.md`](hosted-judge-validation.md). The command list below is kept for
+reproducibility of the local run, not as a to-do list.
 
 ### Configuration
 

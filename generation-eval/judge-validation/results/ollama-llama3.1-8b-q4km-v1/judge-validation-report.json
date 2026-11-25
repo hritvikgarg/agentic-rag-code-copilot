@@ -1,0 +1,90 @@
+{
+  "validation_spec": {
+    "version": "judge-validation-v1",
+    "sha256": "aa8af417b0eceb0347abebdb3fefa9ca833f7e737521e3f0511f002f049aa81a"
+  },
+  "technical_acceptance": {
+    "status": "FAIL",
+    "criteria": [
+      {
+        "id": "T1_pilot_judgements_parse",
+        "status": "NOT_EVALUATED",
+        "detail": "no pilot judgements given"
+      },
+      {
+        "id": "T2_control_parse_success",
+        "status": "FAIL",
+        "detail": "15/18 first-pass model controls parsed (expected 18 controls, minimum fraction 0.95)",
+        "judged": 15,
+        "controls": 18,
+        "fraction": 0.8333333333333334
+      },
+      {
+        "id": "T3_no_accepted_context_overflow_or_truncation",
+        "status": "PASS",
+        "detail": "0 accepted judgement(s) show a possible overflow/truncation; 0 request(s) were correctly refused for context reasons",
+        "violations": [],
+        "refused_for_context": 0
+      },
+      {
+        "id": "T4_no_security_bypass",
+        "status": "PASS",
+        "detail": "0 security problem(s)",
+        "problems": []
+      },
+      {
+        "id": "T5_valid_runtime_fingerprint",
+        "status": "PASS",
+        "detail": "0 problem(s) across 1 artifact(s)",
+        "problems": [],
+        "fingerprints": [
+          "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+        ]
+      },
+      {
+        "id": "T6_cache_isolation_and_resume",
+        "status": "NOT_EVALUATED",
+        "detail": "no repeat pass given"
+      }
+    ]
+  },
+  "semantic_pilot_acceptance": {
+    "status": "FAIL",
+    "criteria": [
+      {
+        "id": "S1_human_exact_agreement",
+        "status": "NOT_EVALUATED",
+        "detail": "no pilot human-agreement file given"
+      },
+      {
+        "id": "S2_no_two_point_disagreement",
+        "status": "NOT_EVALUATED",
+        "detail": "no pilot human-agreement file given"
+      },
+      {
+        "id": "S3_fabricated_negative_controls",
+        "status": "FAIL",
+        "detail": "4/6 fabricated/contradicted/invented controls scored 0",
+        "missed": [
+          "ctl-io-04",
+          "ctl-io-09"
+        ]
+      },
+      {
+        "id": "S4_abstention_discrimination",
+        "status": "FAIL",
+        "detail": "3/4 abstention controls judged correctly (appropriate abstention = abstained & 2, incorrect refusal = abstained & 0)",
+        "wrong": [
+          "ctl-cp-06"
+        ]
+      },
+      {
+        "id": "S5_repeat_consistency",
+        "status": "NOT_EVALUATED",
+        "detail": "needs both control passes and both pilot passes"
+      }
+    ]
+  },
+  "overall": "FAIL",
+  "interpretation": "Passing the technical and semantic pilot criteria shows that the local judge runs safely and reproducibly and behaves sensibly on a very small set; it does not validate the judge for the primary experiment. Only the primary audit criteria do that, and only for that audit sample."
+}

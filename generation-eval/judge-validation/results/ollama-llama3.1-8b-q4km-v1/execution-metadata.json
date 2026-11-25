@@ -1,0 +1,97 @@
+{
+  "schema": "judge-validation-execution-metadata/1",
+  "purpose": "Execution metadata for the one local-judge validation run under judge-validation-v1. The run FAILED; this record exists for reproducibility.",
+  "provenance": {
+    "machine_written_files": [
+      "judge-controls-pass1.json",
+      "judge-validation-report.json"
+    ],
+    "machine_written_files_note": "Copied byte-for-byte from the git-ignored data/judge-validation/llama3.1-8b/controls-1/ directory. The 15 Ollama response-cache files that directory also holds were NOT kept (regenerable, not evidence).",
+    "transcribed_fields_note": "Every field below under 'ollama', 'hardware', 'preflight' and 'run_window' was transcribed by hand from console output the operator pasted into the session. The preflight JSON itself was not saved to a file. The runtime fingerprint and runtime description are also present in the machine-written results file."
+  },
+  "repository": {
+    "commit_at_run": "5b1d331",
+    "validation_spec": "generation-eval/judge-validation/judge-validation-v1.json",
+    "validation_spec_sha256": "aa8af417b0eceb0347abebdb3fefa9ca833f7e737521e3f0511f002f049aa81a",
+    "controls": "generation-eval/judge-controls/controls-v1.json",
+    "controls_sha256": "c6e18e96f5c5acedb0b08d4f9a7a7dd25977f1b5a6393d5d8de945abd90d6476",
+    "judge_prompt_version": "gen-judge-2",
+    "rubric_version": "gen-rubric-1"
+  },
+  "ollama": {
+    "server_version": "0.40.18",
+    "model_tag": "llama3.1:8b",
+    "model_digest": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e",
+    "size_bytes": 4920753328,
+    "quantization": "Q4_K_M",
+    "parameter_size": "8.0B",
+    "family": "llama",
+    "format": "gguf",
+    "model_max_context_length": 131072,
+    "runner": "llamacpp"
+  },
+  "runtime": {
+    "context_size": 8192,
+    "max_output_tokens": 1024,
+    "temperature": 0.0,
+    "seed": 20260,
+    "structured_output": "json",
+    "keep_alive": "30m",
+    "runtime_fingerprint": "50a5ba7e73bf1ca7a01c19bca0c08fc0040bedbadd9a57f2a156c9b37ca626a8"
+  },
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "vram_total_mib": 8188,
+    "vram_used_mib_after_warm_up": 5665,
+    "os": "native Windows"
+  },
+  "preflight": {
+    "ok": true,
+    "quantization_check": "Q4_K_M == Q4_K_M",
+    "gpu_residency": {
+      "gpu_fraction": 1.0,
+      "size_bytes": 5821169663,
+      "size_vram_bytes": 5821169663,
+      "context_length": 8192
+    },
+    "warm_up": {
+      "latency_seconds": 33.842,
+      "prompt_tokens": 39,
+      "completion_tokens": 7
+    },
+    "warnings": []
+  },
+  "run_window": {
+    "timezone_offset": "+05:30",
+    "first_judge_call_logged": "2026-11-26 02:05:33",
+    "last_judge_call_logged": "2026-11-26 02:06:23",
+    "approximate_seconds_for_18_model_controls": 50
+  },
+  "observed_token_counts": {
+    "prompt_tokens_range": [
+      726,
+      1303
+    ],
+    "completion_tokens_range": [
+      56,
+      191
+    ],
+    "note": "from the machine-written results file; no request approached the 7168-token input budget"
+  },
+  "files": {
+    "judge-controls-pass1.json": {
+      "sha256": "7dae814836b4361f2821e124086c68c29ace45d97c1f9beb986d490238621e17"
+    },
+    "judge-validation-report.json": {
+      "sha256": "949b5767378760bbe003e1607ab116c7f61ef9fa7ecd8285925ba1b4beec8bbb"
+    }
+  },
+  "not_run": [
+    "pilot judging",
+    "controls repeat pass",
+    "pilot repeat pass",
+    "pilot human agreement",
+    "primary-audit criteria P1-P4"
+  ],
+  "not_run_reason": "Path 1 closeout: the local judge failed the first-pass controls; further local-model work was stopped by decision."
+}

@@ -54,10 +54,13 @@ a fake SDK client, so no test needs the network.
 
 Purpose: an **independent local judge** for the generation evaluation (different vendor and weights
 from the Gemini generator, no quota, no repository text leaving the machine). It is a provider on the
-same `LLMClient` protocol; nothing else in the stack changes. It was written and tested **offline
-only** (an `httpx.MockTransport` stands in for the server). Real Ollama behaviour - `done_reason`,
-token counts, `/api/ps` fields, GPU residency - is an assumption until you run the commands in
-[`docs/generation-evaluation.md`](generation-evaluation.md#local-ollama-judge-milestone-11b).
+same `LLMClient` protocol; nothing else in the stack changes. It was written and tested offline
+(an `httpx.MockTransport` stands in for the server) and then exercised once against a real Ollama
+0.40.18 on Windows: the preflight (`/api/version`, `/api/tags`, `/api/show`, `/api/ps`, warm-up) and
+18 judge calls behaved as designed - `done_reason` was `stop` on the warm-up, token counts were
+returned on every call, no context-limit failure occurred, and the model was 100% GPU resident at
+`num_ctx` 8192. That run is the local-judge validation, which the model **failed** on output quality,
+not on the plumbing: [`docs/judge-validation-llama3.1-8b.md`](judge-validation-llama3.1-8b.md).
 
 ### Call chain
 
@@ -209,7 +212,7 @@ uv run pytest tests/integration/test_llm_live.py -v -s
 
 ## Limitations
 
-* Two providers (Gemini, Ollama). Adding another means one new class implementing `LLMClient`; nothing else changes. The Ollama provider has never been run against a real server (see above).
+* Two providers (Gemini, Ollama). Adding another means one new class implementing `LLMClient`; nothing else changes. The Ollama provider was exercised against a real server for one model only (`llama3.1:8b`, one validation run); other models and Ollama versions are untested.
 * No streaming, no response cache, no retry/backoff, no token-cost accounting beyond what the
   provider reports.
 * Latency and token counts come from the provider; they vary between runs.
