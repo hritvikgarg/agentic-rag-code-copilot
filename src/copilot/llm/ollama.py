@@ -465,6 +465,42 @@ class OllamaLLMClient:
             "format": details.get("format"),
         }
 
+    def describe_runtime(self) -> dict[str, Any]:
+        """Metadata-only report for ``judge-preflight``: server, model and GPU residency.
+
+        ``loaded`` is ``None`` when the model is not currently in memory (warm it up and look
+        again) or when ``/api/ps`` is unavailable on this server version. Nothing is pulled and no
+        request text is sent.
+        """
+        version = self.server_version()
+        details = self.model_details()
+        loaded: dict[str, Any] | None = None
+        ps_note: str | None = None
+        try:
+            running = self.running_models()
+        except LLMError:
+            running = []
+            ps_note = "the server did not answer /api/ps; GPU residency is unknown"
+        for entry in running:
+            if details["name"] in (entry.get("name"), entry.get("model")):
+                size, vram = entry.get("size"), entry.get("size_vram")
+                ok = isinstance(size, int) and isinstance(vram, int) and size > 0
+                loaded = {
+                    "size_bytes": size if isinstance(size, int) else None,
+                    "size_vram_bytes": vram if isinstance(vram, int) else None,
+                    "gpu_fraction": round(vram / size, 4) if ok else None,
+                    "context_length": _int_or_none(entry.get("context_length")),
+                    "expires_at": entry.get("expires_at"),
+                }
+        return {
+            "endpoint": self._endpoint.display,
+            "loopback": self._endpoint.loopback,
+            "ollama_version": version,
+            "model": details,
+            "loaded": loaded,
+            "notes": [ps_note] if ps_note else [],
+        }
+
     def runtime_identity(self, *, temperature: float, max_output_tokens: int) -> RuntimeIdentity:
         """The full identity of this runtime for a given sampling/output setting.
 

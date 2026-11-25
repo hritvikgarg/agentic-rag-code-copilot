@@ -85,8 +85,14 @@ def _side_reasons(side: SideRecord | None) -> list[str]:
     return []
 
 
-def classify_questions(inputs: Sequence[RepoInputs]) -> list[QuestionStatus]:
-    """One status per benchmark question of every repository in ``inputs``."""
+def classify_questions(
+    inputs: Sequence[RepoInputs], *, require_judge_rating: bool = True
+) -> list[QuestionStatus]:
+    """One status per benchmark question of every repository in ``inputs``.
+
+    ``require_judge_rating=False`` (the blinded pilot worksheet, drawn *before* any judging) makes
+    eligibility depend on the generated answers only: the human rates every answer with text.
+    """
     statuses: list[QuestionStatus] = []
     for item in inputs:
         entries = {e.question_id: e for e in item.run.entries}
@@ -98,7 +104,11 @@ def classify_questions(inputs: Sequence[RepoInputs]) -> list[QuestionStatus]:
                 side = getattr(entry, arm) if entry is not None else None
                 side_reasons = _side_reasons(side)
                 reasons.update(side_reasons)
-                if not side_reasons and not _valid_rating(question, judged.get((question_id, arm))):
+                if (
+                    require_judge_rating
+                    and not side_reasons
+                    and not _valid_rating(question, judged.get((question_id, arm)))
+                ):
                     reasons.add("judge_rating_missing")
             statuses.append(
                 QuestionStatus(
@@ -109,6 +119,22 @@ def classify_questions(inputs: Sequence[RepoInputs]) -> list[QuestionStatus]:
                 )  # fmt: skip
             )
     return statuses
+
+
+def pilot_problems(inputs: Sequence[RepoInputs]) -> list[str]:
+    """Why a pilot worksheet cannot be drawn yet: generation incomplete. Judge-independent."""
+    problems: list[str] = []
+    for item in inputs:
+        repo = item.run.repository_id
+        not_attempted = sum(
+            1 for e in item.run.entries for arm in ARMS if getattr(e, arm).state == "not_attempted"
+        )
+        missing_entries = len(item.questions) - len(item.run.entries)
+        if not_attempted or missing_entries:
+            problems.append(f"{repo}: generation is incomplete (sides were never attempted)")
+        if item.run.stop_reason:
+            problems.append(f"{repo}: the run stopped early ({item.run.stop_reason})")
+    return problems
 
 
 def finalization_problems(inputs: Sequence[RepoInputs]) -> list[str]:

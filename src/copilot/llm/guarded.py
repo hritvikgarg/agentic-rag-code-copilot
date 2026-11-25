@@ -42,6 +42,11 @@ class GuardedLLMClient:
             return None
         return identity(temperature=temperature, max_output_tokens=max_output_tokens)
 
+    def describe_runtime(self) -> dict | None:
+        """Metadata-only description of a local runtime (``None`` for hosted providers)."""
+        describe = getattr(self._inner, "describe_runtime", None)
+        return describe() if describe is not None else None
+
     def generate(self, request: LLMRequest) -> LLMResponse:
         assert_safe_for_external_llm(request.scan_targets())  # raises RepositorySecretRiskError
         return self._inner.generate(request)

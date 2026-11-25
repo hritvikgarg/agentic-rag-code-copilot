@@ -6,7 +6,10 @@
 * ``plan``           dry run: repositories, question counts, generation and judge calls, artifact
                      paths and verified historical reuse. Constructs no provider; offline.
 * ``run``            generate answers (hosted model; requires ``--confirm-model PROVIDER/MODEL``).
-* ``judge``          judge a run's answers (hosted judge model).
+* ``judge``          judge a run's answers (hosted Gemini or local Ollama judge; the judge is chosen
+                     with ``--judge-provider``/``--judge-model``, never by the generation model).
+* ``judge-preflight`` check a local judge runtime (metadata only; never pulls a model).
+* ``judge-compare``  per-answer comparison of two judges on the same generated answers (offline).
 * ``report``         analysis from run and judgement files (offline).
 * ``audit-worksheet`` / ``audit-agree`` / ``audit-rule-check``  the human audit (offline).
 
@@ -40,6 +43,7 @@ from copilot.evaluation.generation.audit_population import (
     classify_questions,
     describe_empty_sample,
     finalization_problems,
+    pilot_problems,
     population_report,
 )
 from copilot.evaluation.generation.audit_rules import (
@@ -61,6 +65,14 @@ from copilot.evaluation.generation.execution import (
 )
 from copilot.evaluation.generation.inventory import build_inventory
 from copilot.evaluation.generation.judge import JudgeCache, LLMJudge
+from copilot.evaluation.generation.judge_compare import compare_judgements
+from copilot.evaluation.generation.judge_compare import render_text as render_comparison
+from copilot.evaluation.generation.judge_preflight import run_preflight
+from copilot.evaluation.generation.judge_selection import (
+    JudgeSelection,
+    check_judgements_dir,
+    resolve_judge,
+)
 from copilot.evaluation.generation.judging import (
     JudgementMismatchError,
     judge_run,
@@ -106,7 +118,7 @@ CopilotBench = "generation-eval/benchmarks/copilot_generation_055a8d5.jsonl"
 SyntheticBench = "generation-eval/benchmarks/inventory_orders_generation.jsonl"
 
 #: Replaced in tests; the only place a hosted client is constructed.
-ClientFactory = Callable[[Settings], LLMClient]
+ClientFactory = Callable[..., LLMClient]
 create_client: ClientFactory = create_llm_client
 
 
@@ -426,19 +438,45 @@ def _cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     return 3 if any(r.stop_reason for r in runs.values()) else 0
 
 
+def _judge_selection(
+    args: argparse.Namespace,
+    settings: Settings,
+    protocol: PrimaryProtocol,
+    root: Path,
+    pilot: PilotSpec | None,
+    *,
+    need_directory: bool = True,
+) -> JudgeSelection:
+    return resolve_judge(
+        args,
+        settings,
+        protocol_max_output_tokens=protocol.judge.max_output_tokens,
+        root=root,
+        out_dir=root / args.output_dir,
+        pilot=pilot is not None,
+        primary_dir=root / DEFAULT_OUTPUT_DIR,
+        pilot_dir=root / DEFAULT_PILOT_OUTPUT_DIR,
+        need_directory=need_directory,
+    )
+
+
+def _judge_client(selection: JudgeSelection) -> LLMClient:
+    """The judge client: local judges get JSON-mode output; hosted behaviour is unchanged."""
+    if selection.local:
+        return create_client(selection.settings, structured_output="json")
+    return create_client(selection.settings)
+
+
 def _cmd_judge(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.root)
     stored = load_protocol(root / args.protocol)
     pilot = _pilot(args, root, stored)
     protocol = _resolved(stored, args.confirm_model)
-    if not args.judge_model:
-        print("refusing to judge: pass --judge-model (a different model family from the "
-              "generator is recommended)", file=sys.stderr)  # fmt: skip
-        return 2
-    llm = create_client(settings.model_copy(update={"llm_model": args.judge_model}))
+    selection = _judge_selection(args, settings, protocol, root, pilot)
+    llm = _judge_client(selection)
     judge = LLMJudge(
-        llm, max_output_tokens=protocol.judge.max_output_tokens, retry_policy=_retry(args),
-        cache=JudgeCache(root / args.output_dir / "cache-judge"),
+        llm, max_output_tokens=selection.max_output_tokens, retry_policy=_retry(args),
+        cache=JudgeCache(selection.cache_dir) if selection.cache_dir is not None else None,
     )  # fmt: skip
     out_dir = root / args.output_dir
     for spec in _selected(protocol, args.repository):
@@ -447,18 +485,72 @@ def _cmd_judge(args: argparse.Namespace, settings: Settings) -> int:
         _expect_scope(run, pilot, spec.repository_id)
         questions = {q.id: q for q in bench.questions}
         refs = {q.id: build_reference(q, files) for q in bench.questions}
-        path = judgement_path(out_dir, spec.repository_id)
+        path = judgement_path(selection.judgements_dir, spec.repository_id)
         prior = load_judgements(path) if path.is_file() else None
         done = judge_run(
             run, questions, refs, judge, checkpoint_path=path, resume_from=prior,
             seed=protocol.audit_seed, progress=lambda m: print(m, file=sys.stderr),
         )  # fmt: skip
-        print(f"{spec.repository_id}: {done.counts()}")
+        line = f"{spec.repository_id}: {done.counts()}"
+        if done.context_failures():
+            line += (
+                f"  context-limit failures: {done.context_failures()} (recorded as failed and "
+                "excluded from the valid judgements)"
+            )
+        print(line)
     return 0
 
 
+def _cmd_judge_preflight(args: argparse.Namespace, settings: Settings) -> int:
+    root = Path(args.root)
+    protocol = load_protocol(root / args.protocol)
+    selection = _judge_selection(args, settings, protocol, root, None, need_directory=False)
+    if not selection.local:
+        print("error: judge-preflight applies to a local judge (--judge-provider ollama)",
+              file=sys.stderr)  # fmt: skip
+        return 2
+    llm = _judge_client(selection)
+    result = run_preflight(
+        llm, temperature=0.0, max_output_tokens=selection.max_output_tokens,
+        expect_quantization=args.expect_quantization, require_gpu=args.require_gpu,
+        warm_up=args.warm_up,
+    )  # fmt: skip
+    print(json.dumps(result, indent=2))
+    for warning in result["warnings"]:
+        print(f"warning: {warning}", file=sys.stderr)
+    return 0 if result["ok"] else 3
+
+
+def _cmd_judge_compare(args: argparse.Namespace, settings: Settings) -> int:
+    root = Path(args.root)
+    out_dir = root / args.output_dir
+    stored = load_protocol(root / args.protocol)
+    pilot = _pilot(args, root, stored)
+    protocol = _resolved_for_audit(args, root, out_dir)
+    dir_a = root / args.dir_a if args.dir_a else out_dir
+    dir_b = root / args.dir_b
+    if dir_a.resolve() == dir_b.resolve():
+        print("error: --dir-a and --dir-b are the same directory", file=sys.stderr)
+        return 2
+    results: dict[str, object] = {}
+    invalid = False
+    for spec in _selected(protocol, args.repository):
+        bench, _ = _check_benchmark(spec, root, settings)
+        first = load_judgements(judgement_path(dir_a, spec.repository_id))
+        second = load_judgements(judgement_path(dir_b, spec.repository_id))
+        outcome = compare_judgements(first, second, {q.id: q for q in bench.questions})
+        results[spec.repository_id] = outcome
+        invalid = invalid or not outcome["identity_verified"]
+        print(f"== {spec.repository_id}\n{render_comparison(outcome)}")
+    target = dir_b / f"judge-compare{'-PILOT' if pilot is not None else ''}.json"
+    write_text_atomically(target, json.dumps(results, indent=2, ensure_ascii=False) + "\n")
+    print(f"wrote {target}")
+    return 3 if invalid else 0
+
+
 def _repo_inputs(protocol: PrimaryProtocol, root: Path, out_dir: Path, settings: Settings,
-                 names: Sequence[str], pilot: PilotSpec | None = None
+                 names: Sequence[str], pilot: PilotSpec | None = None,
+                 judgements_dir: Path | None = None, use_judgements: bool = True,
                  ) -> tuple[list[RepoInputs], dict[str, str]]:  # fmt: skip
     inputs: list[RepoInputs] = []
     files_by_label: dict[str, str] = {}
@@ -469,8 +561,10 @@ def _repo_inputs(protocol: PrimaryProtocol, root: Path, out_dir: Path, settings:
         _expect_scope(run, pilot, spec.repository_id)
         if run.protocol_hash != protocol_hash(protocol):
             raise RunMismatchError(f"{spec.repository_id}: the run belongs to another protocol")
-        judge_file = judgement_path(out_dir, spec.repository_id)
-        judgements = load_judgements(judge_file) if judge_file.is_file() else None
+        judge_file = judgement_path(judgements_dir or out_dir, spec.repository_id)
+        judgements = (
+            load_judgements(judge_file) if use_judgements and judge_file.is_file() else None
+        )
         inputs.append(
             RepoInputs(
                 run=run,
@@ -503,15 +597,26 @@ def _cmd_report(args: argparse.Namespace, settings: Settings) -> int:
     first = load_run(run_path(out_dir, _selected(stored, args.repository)[0].repository_id))
     _expect_scope(first, pilot, "first run file")
     protocol = stored.with_model(first.llm_provider, first.llm_model)
-    inputs, labels = _repo_inputs(protocol, root, out_dir, settings, args.repository, pilot)
+    judgements_dir = root / args.judgements_dir if args.judgements_dir else None
+    if judgements_dir is not None:
+        check_judgements_dir(
+            judgements_dir, pilot=pilot is not None, primary_dir=root / DEFAULT_OUTPUT_DIR,
+            pilot_dir=root / DEFAULT_PILOT_OUTPUT_DIR,
+        )  # fmt: skip
+    inputs, labels = _repo_inputs(
+        protocol, root, out_dir, settings, args.repository, pilot, judgements_dir
+    )
     report = build_report(
         inputs, protocol, input_files=labels, scope="pilot" if pilot is not None else "primary"
     )
     suffix = ("-PILOT" if pilot is not None else "") + (
         "-TEST-ARTIFACT" if report["test_artifact"] else ""
     )
-    json_path = out_dir / f"report{suffix}.json"
-    md_path = out_dir / f"report{suffix}.md"
+    # A report that uses another judge's judgements is written next to those judgements, so it
+    # can never replace the report of a different judge.
+    report_dir = judgements_dir or out_dir
+    json_path = report_dir / f"report{suffix}.json"
+    md_path = report_dir / f"report{suffix}.md"
     write_text_atomically(json_path, json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     write_text_atomically(md_path, render_markdown(report))
     print(f"wrote {json_path} and {md_path}")
@@ -541,10 +646,16 @@ def _resolved_for_audit(args: argparse.Namespace, root: Path, out_dir: Path):
 def _cmd_audit_worksheet(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.root)
     out_dir = root / args.output_dir
+    stored = load_protocol(root / args.protocol)
+    pilot = _pilot(args, root, stored)
     protocol = _resolved_for_audit(args, root, out_dir)
-    inputs, _ = _repo_inputs(protocol, root, out_dir, settings, args.repository)
-    statuses = classify_questions(inputs)
-    problems = finalization_problems(inputs)
+    # The pilot worksheet is drawn BEFORE any judging: no judgement file is read, so the human
+    # ratings cannot be influenced by (or depend on) any judge. Every answer with text is rated.
+    inputs, _ = _repo_inputs(
+        protocol, root, out_dir, settings, args.repository, pilot, use_judgements=pilot is None
+    )
+    statuses = classify_questions(inputs, require_judge_rating=pilot is None)
+    problems = pilot_problems(inputs) if pilot is not None else finalization_problems(inputs)
     provisional = bool(problems)
     if provisional and not args.provisional:
         print(
@@ -554,13 +665,16 @@ def _cmd_audit_worksheet(args: argparse.Namespace, settings: Settings) -> int:
             file=sys.stderr,
         )
         return 2
-    suffix = _suffix(inputs, provisional)
+    suffix = ("-PILOT" if pilot is not None else "") + _suffix(inputs, provisional)
     label = "PROVISIONAL (development only)" if provisional else None
+    if pilot is not None:
+        label = "PILOT (every answer, judge-independent)" + (" PROVISIONAL" if provisional else "")
+    fraction = 1.0 if pilot is not None else protocol.audit_fraction
     eligible = {(s.repository_id, s.question_id) for s in statuses if s.eligible}
     paired = [(i, e) for i, e in _paired_answers(inputs)
               if (i.run.repository_id, e.question_id) in eligible]  # fmt: skip
     units = [AuditUnit(i.run.repository_id, e.question_id, e.answerable) for i, e in paired]
-    sample = sample_audit(units, fraction=protocol.audit_fraction, seed=protocol.audit_seed)
+    sample = sample_audit(units, fraction=fraction, seed=protocol.audit_seed)
     report = population_report(inputs, statuses, sample, problems=problems, provisional=provisional)
     write_text_atomically(
         out_dir / f"audit-population{suffix}.json", json.dumps(report, indent=2) + "\n"
@@ -587,8 +701,7 @@ def _cmd_audit_worksheet(args: argparse.Namespace, settings: Settings) -> int:
     write_text_atomically(out_dir / f"audit-worksheet{suffix}.csv", sheet.to_csv())
     write_text_atomically(out_dir / f"audit-key{suffix}.json", sheet.key_json())
     rule_csv, rule_key, rule_sampled = build_rule_worksheet(
-        rule_items(inputs), fraction=protocol.audit_fraction, seed=protocol.audit_seed,
-        status_label=label,
+        rule_items(inputs), fraction=fraction, seed=protocol.audit_seed, status_label=label,
     )  # fmt: skip
     if rule_sampled:
         write_text_atomically(out_dir / f"audit-rule-worksheet{suffix}.csv", rule_csv)
@@ -605,6 +718,9 @@ def _cmd_audit_worksheet(args: argparse.Namespace, settings: Settings) -> int:
         f"({len(rule_sampled)} sampled for verification in audit-rule-worksheet{suffix}.csv)"
     )
     print(f"the key is audit-key{suffix}.json - do not open it while rating")
+    if pilot is not None:
+        print("PILOT worksheet: drawn before any judging; rate every answer, then run "
+              "audit-agree --pilot --judgements-dir ... after the judge has run")  # fmt: skip
     return 0
 
 
@@ -615,6 +731,14 @@ def _read_csv(path: str) -> list[dict[str, str]]:
 def _cmd_audit_agree(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.root)
     out_dir = root / args.output_dir
+    stored = load_protocol(root / args.protocol)
+    pilot = _pilot(args, root, stored)
+    judgements_dir = root / args.judgements_dir if args.judgements_dir else out_dir
+    if args.judgements_dir:
+        check_judgements_dir(
+            judgements_dir, pilot=pilot is not None, primary_dir=root / DEFAULT_OUTPUT_DIR,
+            pilot_dir=root / DEFAULT_PILOT_OUTPUT_DIR,
+        )  # fmt: skip
     protocol = _resolved_for_audit(args, root, out_dir)
     key = json.loads(Path(args.key).read_text(encoding="utf-8"))
     rows = _read_csv(args.worksheet)
@@ -624,10 +748,13 @@ def _cmd_audit_agree(args: argparse.Namespace, settings: Settings) -> int:
         bench, _ = _check_benchmark(spec, root, settings)
         questions[spec.repository_id] = {q.id: q for q in bench.questions}
         judged[spec.repository_id] = load_judgements(
-            judgement_path(out_dir, spec.repository_id)
+            judgement_path(judgements_dir, spec.repository_id)
         ).by_key()
-    result = evaluate_agreement(rows, key, questions, judged, rater=args.rater)
-    path = out_dir / "audit-agreement.json"
+    result = evaluate_agreement(
+        rows, key, questions, judged, rater=args.rater, pilot=pilot is not None
+    )
+    # Written beside the judgements it evaluates, so two judges' agreement files never collide.
+    path = judgements_dir / f"audit-agreement{'-PILOT' if pilot is not None else ''}.json"
     write_text_atomically(path, json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
     if not result["rows_accounted_for"]:
@@ -704,19 +831,54 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--delay-seconds", type=float, default=0.0)
     run.add_argument("--max-consecutive-rate-limit-failures", type=int, default=3)
 
-    judge = sub.add_parser("judge", help="judge answers (hosted)")
+    def judge_flags(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--judge-provider", choices=["gemini", "ollama"],
+                       help="the judge's provider (default: COPILOT_LLM_PROVIDER); the generation "
+                       "model is never changed")  # fmt: skip
+        p.add_argument("--judge-model", help="the judge model id, e.g. llama3.1:8b")
+        p.add_argument("--judgements-dir", help="where this judge's artifacts live (required for "
+                       "a local judge; never the generation output directory)")  # fmt: skip
+        p.add_argument("--judge-timeout", type=float, help="seconds per request (local: 300)")
+        p.add_argument("--judge-num-ctx", type=int, help="local context window (default 8192)")
+        p.add_argument("--judge-seed", type=int, help="local sampling seed (default 20260)")
+        p.add_argument("--judge-keep-alive", help="how long the local model stays loaded, e.g. 30m")
+        p.add_argument("--judge-max-output-tokens", type=int,
+                       help="judge output budget (local default 1024)")  # fmt: skip
+        p.add_argument("--no-cache", action="store_true", help="bypass the judge cache entirely "
+                       "(repeatability checks)")  # fmt: skip
+
+    judge = sub.add_parser("judge", help="judge answers (hosted Gemini or local Ollama)")
     common(judge)
     pilot_flags(judge)
     retry_flags(judge)
+    judge_flags(judge)
     judge.add_argument("--confirm-model", help="the generation model (to resolve the protocol)")
-    judge.add_argument("--judge-model", help="the judge model id")
+
+    preflight = sub.add_parser("judge-preflight", help="check the local judge runtime (no pull)")
+    common(preflight)
+    judge_flags(preflight)
+    preflight.add_argument("--confirm-model", help="unused; accepted for symmetry with judge")
+    preflight.add_argument("--expect-quantization", help="e.g. Q4_K_M; exit 3 on a mismatch")
+    preflight.add_argument("--require-gpu", action="store_true",
+                           help="exit 3 unless the loaded model is fully GPU resident")  # fmt: skip
+    preflight.add_argument("--warm-up", action="store_true",
+                           help="load the model with one constant, "
+                           "repository-free prompt")  # fmt: skip
+
+    compare = sub.add_parser("judge-compare", help="per-answer comparison of two judges (offline)")
+    common(compare)
+    pilot_flags(compare)
+    compare.add_argument("--dir-a", help="judgements of judge A (default: the output directory)")
+    compare.add_argument("--dir-b", required=True, help="judgements of judge B")
 
     report = sub.add_parser("report", help="analysis report (offline)")
     common(report)
     pilot_flags(report)
+    report.add_argument("--judgements-dir", help="use (and write beside) another judge's files")
 
     worksheet = sub.add_parser("audit-worksheet", help="sample and write the blinded worksheet")
     common(worksheet)
+    pilot_flags(worksheet)
 
     worksheet.add_argument(
         "--provisional", action="store_true",
@@ -725,9 +887,11 @@ def _parser() -> argparse.ArgumentParser:
 
     agree = sub.add_parser("audit-agree", help="agreement between a filled worksheet and the judge")
     common(agree)
+    pilot_flags(agree)
     agree.add_argument("--worksheet", required=True)
     agree.add_argument("--key", required=True)
     agree.add_argument("--rater", default="rater-1")
+    agree.add_argument("--judgements-dir", help="the judge's directory (default: output dir)")
 
     rules = sub.add_parser(
         "audit-rule-check", help="verify the rule-scored system abstentions (not judge agreement)"
@@ -750,6 +914,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "plan": _cmd_plan,
         "run": _cmd_run,
         "judge": _cmd_judge,
+        "judge-preflight": _cmd_judge_preflight,
+        "judge-compare": _cmd_judge_compare,
         "report": _cmd_report,
         "audit-worksheet": _cmd_audit_worksheet,
         "audit-agree": _cmd_audit_agree,

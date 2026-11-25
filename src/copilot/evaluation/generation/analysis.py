@@ -570,6 +570,28 @@ def caveats(
     return out
 
 
+def judge_identity(inputs: Sequence[RepoInputs]) -> dict[str, object]:
+    """Which judge produced each repository's judgements (and, for a local judge, which runtime)."""
+    out: dict[str, object] = {}
+    for item in inputs:
+        file = item.judgements
+        out[item.run.repository_id] = (
+            None
+            if file is None
+            else {
+                "provider": file.judge_provider,
+                "model": file.judge_model,
+                "prompt_version": file.judge_prompt_version,
+                "rubric_version": file.rubric_version,
+                "runtime_fingerprint": file.judge_runtime_fingerprint,
+                "runtime": file.judge_runtime,
+                "context_failures": file.context_failures(),
+                "judgement_file": item.judgement_file,
+            }
+        )
+    return out
+
+
 def build_report(
     inputs: Sequence[RepoInputs],
     protocol: PrimaryProtocol,
@@ -590,6 +612,7 @@ def build_report(
             for i in inputs
         ),
         "protocol_hash": protocol_hash(protocol),
+        "judge": judge_identity(inputs),
         "primary_endpoint": protocol.primary_endpoint.model_dump(),
         "input_sha256": {label: file_sha256(path) for label, path in sorted(input_files.items())},
         "analysis": result,
@@ -633,6 +656,21 @@ def render_markdown(report: Mapping[str, object]) -> str:
             "",
         ]
     lines += [f"Protocol hash: `{report['protocol_hash']}`", ""]
+    for repo, judge in sorted((report.get("judge") or {}).items()):  # type: ignore[union-attr]
+        if judge is None:
+            continue
+        runtime = judge["runtime_fingerprint"]
+        lines.append(
+            f"Judge ({repo}): `{judge['provider']}/{judge['model']}`, prompt "
+            f"`{judge['prompt_version']}`, rubric `{judge['rubric_version']}`"
+            + (f", runtime fingerprint `{runtime[:16]}`" if runtime else "")
+            + (
+                f", {judge['context_failures']} context-limit failure(s)"
+                if judge["context_failures"]
+                else ""
+            )
+        )
+    lines.append("")
     endpoint = report["primary_endpoint"]
     lines += [f"**Primary endpoint:** {endpoint['name']}", "", endpoint["definition"], ""]  # type: ignore[index]
     analysis = report["analysis"]
