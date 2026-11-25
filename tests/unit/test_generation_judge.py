@@ -62,6 +62,7 @@ GOOD = json.dumps(
         "material_unsupported_claims": [],
         "groundedness": 2,
         "abstained": False,
+        "response_type": "answered",
         "notes": "ok",
     }
 )
@@ -130,12 +131,20 @@ def test_valid_output_becomes_an_assessment_and_a_score():
     [
         "not json",
         "[]",
-        json.dumps({"fact_verdicts": {"f1": "supported"}, "groundedness": 2, "abstained": False}),
+        json.dumps(
+            {
+                "fact_verdicts": {"f1": "supported"},
+                "groundedness": 2,
+                "abstained": False,
+                "response_type": "answered",
+            }
+        ),
         json.dumps(
             {
                 "fact_verdicts": {"f1": "supported", "f2": "maybe"},
                 "groundedness": 2,
                 "abstained": False,
+                "response_type": "answered",
             }
         ),
         json.dumps(
@@ -143,6 +152,7 @@ def test_valid_output_becomes_an_assessment_and_a_score():
                 "fact_verdicts": {"f1": "supported", "f9": "missing"},
                 "groundedness": 2,
                 "abstained": False,
+                "response_type": "answered",
             }
         ),
         json.dumps(
@@ -150,6 +160,7 @@ def test_valid_output_becomes_an_assessment_and_a_score():
                 "fact_verdicts": {"f1": "supported", "f2": "missing"},
                 "groundedness": 5,
                 "abstained": False,
+                "response_type": "answered",
             }
         ),
         json.dumps({"fact_verdicts": {"f1": "supported", "f2": "missing"}, "groundedness": 2}),
@@ -166,6 +177,7 @@ def test_valid_output_becomes_an_assessment_and_a_score():
                 "fact_verdicts": {"f1": "supported", "f2": "missing"},
                 "groundedness": 2,
                 "abstained": False,
+                "response_type": "answered",
                 "material_unsupported_claims": ["x" * 401],
             }
         ),
@@ -176,8 +188,55 @@ def test_malformed_output_is_an_error_never_a_default(bad):
         parse_judge_output(bad, _question(), evaluator_id="x")
 
 
+@pytest.mark.parametrize(
+    ("abstained", "response_type"),
+    [
+        (False, "insufficient_evidence"),
+        (False, "mixed"),
+        (True, "answered"),
+        (True, "generic_refusal"),
+    ],
+)
+def test_response_type_must_agree_with_abstained(abstained, response_type):
+    bad = json.dumps(
+        {"fact_verdicts": {"f1": "supported", "f2": "missing"}, "groundedness": 2,
+         "abstained": abstained, "response_type": response_type}
+    )  # fmt: skip
+    with pytest.raises(JudgeParseError):
+        parse_judge_output(bad, _question(), evaluator_id="x")
+
+
+def test_response_type_is_required_and_closed():
+    base = {"fact_verdicts": {"f1": "supported", "f2": "missing"}, "groundedness": 2,
+            "abstained": False}  # fmt: skip
+    for extra in ({}, {"response_type": "refused"}):
+        with pytest.raises(JudgeParseError):
+            parse_judge_output(json.dumps({**base, **extra}), _question(), evaluator_id="x")
+
+
+@pytest.mark.parametrize(
+    ("abstained", "response_type"),
+    [(True, "insufficient_evidence"), (True, "mixed"), (False, "generic_refusal"),
+     (False, "answered"), (True, "ambiguous"), (False, "ambiguous")],
+)  # fmt: skip
+def test_every_consistent_response_type_parses(abstained, response_type):
+    ok = json.dumps(
+        {"fact_verdicts": {"f1": "supported", "f2": "missing"}, "groundedness": 2,
+         "abstained": abstained, "response_type": response_type}
+    )  # fmt: skip
+    a = parse_judge_output(ok, _question(), evaluator_id="x")
+    assert a.response_type == response_type and a.abstained is abstained
+
+
 def test_unanswerable_output_must_have_no_fact_verdicts():
-    ok = json.dumps({"fact_verdicts": {}, "groundedness": 2, "abstained": True})
+    ok = json.dumps(
+        {
+            "fact_verdicts": {},
+            "groundedness": 2,
+            "abstained": True,
+            "response_type": "insufficient_evidence",
+        }
+    )
     assert parse_judge_output(ok, _unanswerable(), evaluator_id="x").abstained
     with pytest.raises(JudgeParseError):
         parse_judge_output(GOOD, _unanswerable(), evaluator_id="x")

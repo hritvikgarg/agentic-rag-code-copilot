@@ -29,9 +29,21 @@ FAST = RetryPolicy(initial_delay_seconds=0.0, max_attempts=2)
 def _judge_reply(request) -> str:
     if "Key fact" in request.user_prompt:
         return json.dumps(
-            {"fact_verdicts": {"f1": "supported"}, "groundedness": 2, "abstained": False}
+            {
+                "fact_verdicts": {"f1": "supported"},
+                "groundedness": 2,
+                "abstained": False,
+                "response_type": "answered",
+            }
         )
-    return json.dumps({"fact_verdicts": {}, "groundedness": 2, "abstained": True})
+    return json.dumps(
+        {
+            "fact_verdicts": {},
+            "groundedness": 2,
+            "abstained": True,
+            "response_type": "insufficient_evidence",
+        }
+    )
 
 
 def _refs(ctx):

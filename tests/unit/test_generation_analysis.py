@@ -141,11 +141,18 @@ def pipeline(tmp_path):
     def judge_reply(request):
         text = request.user_prompt
         if "Key fact" not in text:
-            return json.dumps({"fact_verdicts": {}, "groundedness": 2, "abstained": False})
+            return json.dumps(
+                {
+                    "fact_verdicts": {},
+                    "groundedness": 2,
+                    "abstained": False,
+                    "response_type": "answered",
+                }
+            )
         verdict = "supported" if "rag answer" in text else "missing"
         return json.dumps(
             {"fact_verdicts": {"f1": verdict}, "groundedness": 2 if verdict == "supported" else 1,
-             "abstained": False}
+             "abstained": False, "response_type": "answered"}
         )  # fmt: skip
 
     ctx = _ctx(n=4)

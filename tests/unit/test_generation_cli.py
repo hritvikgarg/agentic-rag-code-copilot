@@ -160,10 +160,18 @@ def test_the_full_offline_pipeline_run_judge_report_audit(project, monkeypatch, 
     def judge_reply(request):
         text = request.user_prompt
         if "Key fact" not in text:
-            return json.dumps({"fact_verdicts": {}, "groundedness": 2, "abstained": False})
+            return json.dumps(
+                {
+                    "fact_verdicts": {},
+                    "groundedness": 2,
+                    "abstained": False,
+                    "response_type": "answered",
+                }
+            )
         ok = "sum of the items" in text.split("BEGIN ANSWER")[1]
         return json.dumps({"fact_verdicts": {"f1": "supported" if ok else "missing"},
-                           "groundedness": 2 if ok else 1, "abstained": False})  # fmt: skip
+                           "groundedness": 2 if ok else 1, "abstained": False,
+                           "response_type": "answered"})  # fmt: skip
 
     monkeypatch.setattr(cli, "create_client",
                         lambda s: FakeLLMClient(judge_reply, model=s.llm_model))  # fmt: skip

@@ -48,7 +48,7 @@ from copilot.llm.models import LLMRequest, LLMResponse
 from copilot.llm.retry import DEFAULT_RETRY_POLICY, RetryPolicy, call_with_retry
 from copilot.rag.models import AnswerStatus, GenerationInfo, PlainAnswer, RagAnswer
 from copilot.rag.service import RagService, SupportsRetrieve, answer_plain
-from copilot.security import RepositorySecretRiskError
+from copilot.security import RepositorySecretRiskError, assert_safe_for_external_llm
 from copilot.utils.atomic_file import write_text_atomically
 
 logger = logging.getLogger(__name__)
@@ -205,8 +205,9 @@ class ResponseCache:
 class MeteredLLM:
     """An ``LLMClient`` wrapper: counts provider calls, records the input hash and serves the cache.
 
-    It must be placed *under* the secret gate (the services wrap whatever they are given), so a
-    request is scanned before this wrapper sees it - a cache can never bypass the gate.
+    It sits *under* the secret gate (the services wrap whatever they are given) and additionally
+    scans every request itself before any cache lookup or provider call, so the policy holds even
+    if a caller forgets the guard: a cache can never bypass the gate.
     """
 
     def __init__(
@@ -227,6 +228,7 @@ class MeteredLLM:
         self.last_from_cache = False
 
     def generate(self, request: LLMRequest) -> LLMResponse:
+        assert_safe_for_external_llm(request.scan_targets())  # raises RepositorySecretRiskError
         key, self.last_input_sha = response_cache_key(self.provider, self.model, request)
         if self._cache is not None:
             cached = self._cache.get(key)

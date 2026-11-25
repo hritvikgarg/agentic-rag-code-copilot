@@ -51,6 +51,13 @@ class FactVerdict(StrEnum):
     CONTRADICTED = "contradicted"  # the answer states something that conflicts with it
 
 
+ResponseType = Literal["answered", "insufficient_evidence", "generic_refusal", "mixed", "ambiguous"]
+
+#: ``abstained`` is true exactly for these response types (``ambiguous`` may be either).
+ABSTAINING_TYPES = frozenset({"insufficient_evidence", "mixed"})
+NON_ABSTAINING_TYPES = frozenset({"answered", "generic_refusal"})
+
+
 class Assessment(BaseModel):
     """What one evaluator concluded about one answer. Raw answer text is stored elsewhere."""
 
@@ -63,6 +70,17 @@ class Assessment(BaseModel):
     groundedness: int = Field(ge=0, le=2)  # 0 mostly unsupported, 1 mixed, 2 all supported
     abstained: bool  # the answer says the repository evidence/knowledge is insufficient
     notes: str = ""
+    # What kind of response this is (judge prompt gen-judge-2 and the system rule). ``None`` for
+    # assessments made without the distinction (human worksheets, gen-judge-1 files).
+    response_type: ResponseType | None = None
+
+    @model_validator(mode="after")
+    def _type_matches_abstained(self) -> Assessment:
+        if self.response_type in ABSTAINING_TYPES and not self.abstained:
+            raise ValueError(f"response_type {self.response_type!r} requires abstained=true")
+        if self.response_type in NON_ABSTAINING_TYPES and self.abstained:
+            raise ValueError(f"response_type {self.response_type!r} requires abstained=false")
+        return self
 
     @model_validator(mode="after")
     def _claims_are_short(self) -> Assessment:

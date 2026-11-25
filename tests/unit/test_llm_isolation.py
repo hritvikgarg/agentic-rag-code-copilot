@@ -40,8 +40,9 @@ def test_only_the_protocol_the_guard_gemini_and_fake_define_generate():
     )
     # evaluation/generation/execution.py (Milestone 11A): ``MeteredLLM`` is a pass-through wrapper
     # (call counter + response cache) that is only ever handed to ``answer_plain`` / ``RagService``,
-    # which wrap it in ``GuardedLLMClient`` first, so every request is secret-scanned before it
-    # reaches the cache or the provider (tests/unit/test_generation_execution.py proves it).
+    # which wrap it in ``GuardedLLMClient`` first; it also runs the secret gate itself before any
+    # cache lookup, so every request is scanned before it reaches the cache or the provider
+    # (tests/unit/test_generation_execution.py and test_generation_cache_gate.py prove it).
     assert implementers == [
         "evaluation/generation/execution.py",
         "llm/base.py",

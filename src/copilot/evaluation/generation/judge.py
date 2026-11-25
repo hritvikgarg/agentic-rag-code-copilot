@@ -50,18 +50,19 @@ from copilot.evaluation.generation.rubric import (
     Assessment,
     EvaluationError,
     FactVerdict,
+    ResponseType,
     validate_assessment,
 )
 from copilot.evaluation.generation.schema import GenerationQuestion
 from copilot.llm import LLMClient, LLMError, LLMRequest
 from copilot.llm.guarded import GuardedLLMClient
 from copilot.llm.retry import DEFAULT_RETRY_POLICY, RetryPolicy, call_with_retry
-from copilot.security import RepositorySecretRiskError
+from copilot.security import RepositorySecretRiskError, assert_safe_for_external_llm
 from copilot.utils.atomic_file import write_text_atomically
 
 logger = logging.getLogger(__name__)
 
-JUDGE_PROMPT_VERSION = "gen-judge-1"
+JUDGE_PROMPT_VERSION = "gen-judge-2"
 DEFAULT_JUDGE_MAX_OUTPUT_TOKENS = 4096
 
 JUDGE_SYSTEM_PROMPT = """\
@@ -89,10 +90,23 @@ repository-specific claims).
 evidence is insufficient, for the question or its main part.
 If the question has no key facts (the repository cannot answer it), "fact_verdicts" must be {} \
 and "abstained" says whether the answer admits that the repository does not show the information.
+"response_type" is exactly one of:
+- "answered": the answer gives substantive content and does not say it cannot answer;
+- "insufficient_evidence": the answer's main message is that the repository evidence is \
+insufficient or does not show the requested information (clearly labelled general knowledge may \
+accompany it);
+- "generic_refusal": the answer refuses or deflects without saying that the repository lacks the \
+information (for example "I cannot help with that");
+- "mixed": the answer says part of the information is not shown AND asserts repository-specific \
+content for the main part of the question;
+- "ambiguous": none of the above can be decided from the text.
+"abstained" is true exactly when "response_type" is "insufficient_evidence" or "mixed", and false \
+when it is "answered" or "generic_refusal" ("ambiguous" may be either).
 
 Reply with ONE JSON object and nothing else:
 {"fact_verdicts": {"<fact id>": "supported|missing|contradicted"}, \
-"material_unsupported_claims": ["..."], "groundedness": 0, "abstained": false, "notes": "..."}
+"material_unsupported_claims": ["..."], "groundedness": 0, "abstained": false, \
+"response_type": "answered", "notes": "..."}
 """
 
 _SOURCE_LABEL = re.compile(
@@ -144,6 +158,7 @@ class _RawJudgeOutput(BaseModel):
     material_unsupported_claims: list[str] = []
     groundedness: int
     abstained: bool
+    response_type: ResponseType
     notes: str = ""
 
 
@@ -168,6 +183,7 @@ def parse_judge_output(text: str, question: GenerationQuestion, *, evaluator_id:
             ),
             groundedness=raw.groundedness,
             abstained=raw.abstained,
+            response_type=raw.response_type,
             notes=raw.notes[:500],
         )
         validate_assessment(question, assessment)
@@ -287,10 +303,6 @@ class LLMJudge:
             max_output_tokens=self.max_output_tokens,
             input_sha256=input_sha,
         )
-        if self.cache is not None:
-            cached = self.cache.get(key)
-            if cached is not None:
-                return cached.model_copy(update={"blind_id": blind_id}), True
         base = {
             "question_id": question.id,
             "blind_id": blind_id,
@@ -298,6 +310,18 @@ class LLMJudge:
             "judge_model": self.llm.model,
             "input_sha256": input_sha,
         }
+        # The secret gate runs BEFORE the cache lookup, so cached and uncached requests are held
+        # to the same policy (a stale or planted cache entry cannot be served for blocked input).
+        try:
+            assert_safe_for_external_llm(request.scan_targets())
+        except RepositorySecretRiskError as exc:
+            return JudgeRecord(
+                state="failed", error=f"{type(exc).__name__}: {exc}"[:300], **base
+            ), False
+        if self.cache is not None:
+            cached = self.cache.get(key)
+            if cached is not None:
+                return cached.model_copy(update={"blind_id": blind_id}), True
         guarded = GuardedLLMClient(self.llm)
         sleep = self.retry_sleep
         try:
