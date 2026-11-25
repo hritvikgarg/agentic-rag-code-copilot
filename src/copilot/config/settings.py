@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # (the same heuristic as chunking). Whole evidence blocks are dropped, never cut in half.
     rag_context_max_tokens: int = Field(default=6000, ge=200, le=200_000)
     ollama_base_url: str = "http://localhost:11434"
+    # Local-model runtime (Milestone 11B). The context window and seed are explicit so a local
+    # run is reproducible and its context budget is known; keep-alive only controls how long the
+    # model stays loaded. A non-loopback endpoint is refused unless explicitly authorised.
+    ollama_num_ctx: int = Field(default=8192, ge=1024, le=131072)
+    ollama_seed: int = 20260
+    ollama_keep_alive: str = "30m"
+    ollama_allow_remote: bool = False
     gemini_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("GEMINI_API_KEY", "COPILOT_GEMINI_API_KEY"),

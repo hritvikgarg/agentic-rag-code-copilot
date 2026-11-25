@@ -1,6 +1,6 @@
-"""Provider-independent LLM interface (Milestone 6): Fake and Gemini clients plus the secret gate.
+"""Provider-independent LLM interface: Fake, Gemini (hosted) and Ollama (local) clients.
 
-Only the Gemini provider is implemented. Every hosted call goes through ``GuardedLLMClient``.
+Every call goes through ``GuardedLLMClient`` (the secret gate), including local ones.
 See ``docs/llm.md``.
 """
 
@@ -9,6 +9,7 @@ from copilot.llm.errors import (
     LLMAuthenticationError,
     LLMConfigurationError,
     LLMConnectionError,
+    LLMContextLimitError,
     LLMError,
     LLMProviderError,
     LLMRateLimitError,
@@ -20,7 +21,9 @@ from copilot.llm.fake import FakeLLMClient
 from copilot.llm.gemini import GeminiLLMClient
 from copilot.llm.guarded import GuardedLLMClient
 from copilot.llm.models import LLMRequest, LLMResponse
+from copilot.llm.ollama import OllamaLLMClient
 from copilot.llm.retry import RetryPolicy, call_with_retry, is_transient
+from copilot.llm.runtime import RuntimeIdentity
 
 __all__ = [
     "FakeLLMClient",
@@ -30,6 +33,7 @@ __all__ = [
     "LLMClient",
     "LLMConfigurationError",
     "LLMConnectionError",
+    "LLMContextLimitError",
     "LLMError",
     "LLMProviderError",
     "LLMRateLimitError",
@@ -37,7 +41,9 @@ __all__ = [
     "LLMResponse",
     "LLMResponseError",
     "LLMTimeoutError",
+    "OllamaLLMClient",
     "RetryPolicy",
+    "RuntimeIdentity",
     "call_with_retry",
     "create_llm_client",
     "is_transient",

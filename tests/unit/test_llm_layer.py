@@ -120,8 +120,8 @@ def test_factory_requires_a_model_and_a_key_and_never_defaults_a_model():
         create_llm_client(Settings(_env_file=None, gemini_api_key="k" * 12))
     with pytest.raises(LLMConfigurationError, match="GEMINI_API_KEY"):
         create_llm_client(Settings(_env_file=None, llm_model="some-model"))
-    with pytest.raises(LLMConfigurationError, match="not implemented"):
-        create_llm_client(Settings(_env_file=None, llm_provider="ollama", llm_model="m"))
+    with pytest.raises(LLMConfigurationError, match="COPILOT_LLM_MODEL"):
+        create_llm_client(Settings(_env_file=None, llm_provider="ollama"))
 
 
 def test_factory_returns_a_guarded_client_without_calling_the_network():

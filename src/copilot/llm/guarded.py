@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from copilot.llm.base import LLMClient
 from copilot.llm.models import LLMRequest, LLMResponse
+from copilot.llm.runtime import RuntimeIdentity
 from copilot.security import assert_safe_for_external_llm
 
 
@@ -28,6 +29,18 @@ class GuardedLLMClient:
     @property
     def model(self) -> str:
         return self._inner.model
+
+    def runtime_identity(
+        self, *, temperature: float, max_output_tokens: int
+    ) -> RuntimeIdentity | None:
+        """The wrapped client's runtime identity, or ``None`` for hosted providers (Gemini).
+
+        A metadata call only (model digest, server version); it carries no request text.
+        """
+        identity = getattr(self._inner, "runtime_identity", None)
+        if identity is None:
+            return None
+        return identity(temperature=temperature, max_output_tokens=max_output_tokens)
 
     def generate(self, request: LLMRequest) -> LLMResponse:
         assert_safe_for_external_llm(request.scan_targets())  # raises RepositorySecretRiskError

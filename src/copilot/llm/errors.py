@@ -72,3 +72,15 @@ class LLMProviderError(LLMError):
 
 class LLMResponseError(LLMError):
     """The provider answered, but with no usable text (empty, blocked or malformed)."""
+
+
+class LLMContextLimitError(LLMError):
+    """The request or response cannot be trusted to fit the model's context window.
+
+    Raised *before* sending when the conservative input estimate exceeds the budget, and *after*
+    the answer when the provider's own metadata says the output may have been cut short or the
+    context may have been truncated or shifted. The message contains token counts and a fixed
+    explanation only - never request text. A failure of this kind is never silently repaired
+    (no prompt shortening, no discarded evidence): it is reported and the item is excluded from
+    the valid-judgement counts.
+    """

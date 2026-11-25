@@ -29,7 +29,7 @@ def test_the_services_and_factory_route_every_call_through_the_guard():
     assert "GuardedLLMClient(" in factory
 
 
-def test_only_the_protocol_the_guard_gemini_and_fake_define_generate():
+def test_only_the_protocol_the_guard_gemini_ollama_and_fake_define_generate():
     # .as_posix() keeps the comparison platform-independent: relative_to() renders native
     # separators, so a bare str() would read "llm\\base.py" on Windows and fail here for a
     # reason that has nothing to do with the isolation invariant being checked.
@@ -49,4 +49,5 @@ def test_only_the_protocol_the_guard_gemini_and_fake_define_generate():
         "llm/fake.py",
         "llm/gemini.py",
         "llm/guarded.py",
+        "llm/ollama.py",
     ]
