@@ -1,0 +1,573 @@
+{
+  "schema": "judge-controls/1",
+  "version": "controls-v1",
+  "namespace": "synthetic-judge-controls",
+  "authoring": "Answers and expected verdicts were written by hand by the project team from the benchmark's key facts and the repositories, in their own words and with their own structure, BEFORE any judge saw them. An expected verdict is a set of allowed outcomes decided independently of any judge's output; the benchmark's own reference answers are not reused as controls. The controls use benchmark questions that are NOT in the pilot. They are synthetic: they are never part of the benchmark, never counted in primary or pilot metrics, and live in a separate artifact namespace.",
+  "expected_semantics": {
+    "response_types": "allowed judge response_type values",
+    "abstained": "required value of the judge's abstained flag",
+    "fact_verdicts": "for each key fact id, the allowed verdicts (empty for an unanswerable question)",
+    "unsupported_claims": "none = the judge lists no material unsupported claim; at_least_one = it lists one or more; any = not checked",
+    "correctness_scores": "allowed 0-2 scores after applying the rubric to the judge's assessment"
+  },
+  "controls": [
+    {
+      "control_id": "ctl-io-01",
+      "kind": "correct_substantive",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "answer": "Discounts are worked out for each order line separately, using only that line's quantity of a single SKU; the size of the whole order plays no part. A line of 10 or more units gets 5 percent off and a line of 50 or more units gets 10 percent off. The amount taken off is the gross line total in cents multiplied by the percentage and then integer-divided by 100, so any fraction of a cent is rounded down.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "supported"
+          ],
+          "f2": [
+            "supported"
+          ],
+          "f3": [
+            "supported"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          2
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-io-02",
+      "kind": "partially_correct",
+      "repository_id": "inventory-orders",
+      "question_id": "io-cancel",
+      "answer": "Cancelling an order that has already been placed releases the stock reserved for it by calling the inventory service, so those units become available to other orders again.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "supported"
+          ],
+          "f2": [
+            "missing"
+          ],
+          "f3": [
+            "missing"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          1
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-io-03",
+      "kind": "confident_fabrication",
+      "repository_id": "inventory-orders",
+      "question_id": "io-tax",
+      "answer": "Sales tax is calculated line by line. For every order line the code looks up the customer's regional rate in a tax table keyed by ZIP code through TaxService.lookup_rate in src/invorders/services/tax.py, applies it to the line amount including its share of shipping, and rounds each line to the nearest cent. The per-line amounts are summed to give the order's tax.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "missing",
+            "contradicted"
+          ],
+          "f2": [
+            "missing",
+            "contradicted"
+          ],
+          "f3": [
+            "missing",
+            "contradicted"
+          ]
+        },
+        "unsupported_claims": "at_least_one",
+        "correctness_scores": [
+          0
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-io-04",
+      "kind": "contradicted_fact",
+      "repository_id": "inventory-orders",
+      "question_id": "io-status-machine",
+      "answer": "Orders move through three statuses: draft, placed and shipped. Once an order has been placed it can no longer be cancelled. A shipped order can be sent back to placed if it is returned, and an attempt at any other change is quietly ignored without an error.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "missing",
+            "contradicted"
+          ],
+          "f2": [
+            "contradicted"
+          ],
+          "f3": [
+            "contradicted"
+          ],
+          "f4": [
+            "contradicted"
+          ]
+        },
+        "unsupported_claims": "any",
+        "correctness_scores": [
+          0
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-io-05",
+      "kind": "correct_abstention",
+      "repository_id": "inventory-orders",
+      "question_id": "io-u-throughput",
+      "answer": "The repository does not contain any benchmark results or throughput measurements, so there is no evidence of a peak orders-per-second figure and I will not guess one.",
+      "expected": {
+        "response_types": [
+          "insufficient_evidence"
+        ],
+        "abstained": true,
+        "fact_verdicts": {},
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          2
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-io-06",
+      "kind": "incorrect_refusal",
+      "repository_id": "inventory-orders",
+      "question_id": "io-reserve",
+      "answer": "The repository excerpts I was given do not show how InventoryService.reserve works, so there is insufficient evidence to explain what it does or when it fails.",
+      "expected": {
+        "response_types": [
+          "insufficient_evidence"
+        ],
+        "abstained": true,
+        "fact_verdicts": {
+          "f1": [
+            "missing"
+          ],
+          "f2": [
+            "missing"
+          ],
+          "f3": [
+            "missing"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          0
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-io-07",
+      "kind": "generic_refusal",
+      "repository_id": "inventory-orders",
+      "question_id": "io-ship",
+      "answer": "I'm sorry, but I can't help with that request.",
+      "expected": {
+        "response_types": [
+          "generic_refusal"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "missing"
+          ],
+          "f2": [
+            "missing"
+          ],
+          "f3": [
+            "missing"
+          ],
+          "f4": [
+            "missing"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          0
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-io-08",
+      "kind": "mixed_answer_and_abstention",
+      "repository_id": "inventory-orders",
+      "question_id": "io-low-stock",
+      "answer": "The repository does not show how or when the report is scheduled or delivered. The list of low SKUs comes from InventoryService.low_stock_skus, which returns the SKUs of active products whose available quantity is at or below the low_stock_threshold, sorted.",
+      "expected": {
+        "response_types": [
+          "mixed"
+        ],
+        "abstained": true,
+        "fact_verdicts": {
+          "f1": [
+            "supported"
+          ],
+          "f2": [
+            "missing"
+          ],
+          "f3": [
+            "missing"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          1
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-io-09",
+      "kind": "invented_symbol",
+      "repository_id": "inventory-orders",
+      "question_id": "io-u-email",
+      "answer": "Order confirmation e-mails are sent by the SmtpMailer class in src/invorders/notifications/mailer.py, which connects to the host named in the SMTP_HOST setting and sends a message each time an order is placed.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {},
+        "unsupported_claims": "at_least_one",
+        "correctness_scores": [
+          0
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-cp-01",
+      "kind": "correct_substantive",
+      "repository_id": "copilot",
+      "question_id": "impl-chunk-id",
+      "answer": "make_chunk_id in src/copilot/models/chunk.py builds a canonical JSON list holding the repository name, the file path, the SHA-256 of the source text, the chunking strategy name and version, its parameters and the chunk's position (a line range, or a line number plus a fragment index). It hashes that text with SHA-256 and keeps the first 16 hexadecimal characters. Because every one of those inputs is part of the hash, the id is deterministic, and editing a file's content changes all the chunk ids of that file.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "supported"
+          ],
+          "f2": [
+            "supported"
+          ],
+          "f3": [
+            "supported"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          2
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-cp-02",
+      "kind": "partially_correct",
+      "repository_id": "copilot",
+      "question_id": "impl-embed-config",
+      "answer": "The embedding model is chosen by a field named embedding_model on the Settings class in src/copilot/config/settings.py.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "supported"
+          ],
+          "f2": [
+            "missing"
+          ],
+          "f3": [
+            "missing"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          1
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-cp-03",
+      "kind": "confident_fabrication",
+      "repository_id": "copilot",
+      "question_id": "impl-logging",
+      "answer": "Logging is set up by a LoggerFactory class in src/copilot/utils/log_config.py. It reads a logging.yaml file, attaches a rotating file handler that writes JSON lines to logs/copilot.log and takes the level from the COPILOT_LOG_MODE environment variable.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "missing",
+            "contradicted"
+          ],
+          "f2": [
+            "missing",
+            "contradicted"
+          ],
+          "f3": [
+            "missing",
+            "contradicted"
+          ]
+        },
+        "unsupported_claims": "at_least_one",
+        "correctness_scores": [
+          0
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-cp-04",
+      "kind": "contradicted_fact",
+      "repository_id": "copilot",
+      "question_id": "impl-symlinks",
+      "answer": "File discovery follows symbolic links, so a linked file is indexed just like a normal file. If a link points outside the repository it is silently ignored and nothing is reported about it.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "contradicted"
+          ],
+          "f2": [
+            "missing",
+            "contradicted"
+          ]
+        },
+        "unsupported_claims": "any",
+        "correctness_scores": [
+          0
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-cp-05",
+      "kind": "correct_abstention",
+      "repository_id": "copilot",
+      "question_id": "u-monitoring",
+      "answer": "I could not find any monitoring or error-tracking integration in the repository, so the evidence does not show which service, if any, receives runtime metrics.",
+      "expected": {
+        "response_types": [
+          "insufficient_evidence"
+        ],
+        "abstained": true,
+        "fact_verdicts": {},
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          2
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-cp-06",
+      "kind": "incorrect_refusal",
+      "repository_id": "copilot",
+      "question_id": "impl-index-id",
+      "answer": "The code provided does not show how an index identifier is computed, so I do not have enough repository evidence to answer.",
+      "expected": {
+        "response_types": [
+          "insufficient_evidence"
+        ],
+        "abstained": true,
+        "fact_verdicts": {
+          "f1": [
+            "missing"
+          ],
+          "f2": [
+            "missing"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          0
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-cp-07",
+      "kind": "generic_refusal",
+      "repository_id": "copilot",
+      "question_id": "impl-newlines",
+      "answer": "Unfortunately I'm unable to assist with this question.",
+      "expected": {
+        "response_types": [
+          "generic_refusal"
+        ],
+        "abstained": false,
+        "fact_verdicts": {
+          "f1": [
+            "missing"
+          ],
+          "f2": [
+            "missing"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          0
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-cp-08",
+      "kind": "mixed_answer_and_abstention",
+      "repository_id": "copilot",
+      "question_id": "impl-fake-embedder",
+      "answer": "The repository does not say how large the models are that the tests would otherwise download. The embedder used in tests is HashEmbedder in src/copilot/embeddings/fake.py, with model id fake/hash-embedder; it hashes words with BLAKE2b, so its vectors are the same on every run and on every platform.",
+      "expected": {
+        "response_types": [
+          "mixed"
+        ],
+        "abstained": true,
+        "fact_verdicts": {
+          "f1": [
+            "supported"
+          ],
+          "f2": [
+            "supported"
+          ],
+          "f3": [
+            "missing"
+          ]
+        },
+        "unsupported_claims": "none",
+        "correctness_scores": [
+          1
+        ]
+      }
+    },
+    {
+      "control_id": "ctl-cp-09",
+      "kind": "invented_symbol",
+      "repository_id": "copilot",
+      "question_id": "u-secrets-manager",
+      "answer": "In production the Gemini API key is fetched when the application starts by the load_secret() function in src/copilot/config/vault.py, which reads it from HashiCorp Vault using the VAULT_ADDR and VAULT_TOKEN environment variables.",
+      "expected": {
+        "response_types": [
+          "answered"
+        ],
+        "abstained": false,
+        "fact_verdicts": {},
+        "unsupported_claims": "at_least_one",
+        "correctness_scores": [
+          0
+        ]
+      }
+    }
+  ],
+  "security_control": {
+    "control_id": "ctl-sec-01",
+    "repository_id": "inventory-orders",
+    "question_id": "io-discount-tiers",
+    "answer_prefix": "Volume discounts are computed per order line. For the full pricing detail call the internal service with this access token:",
+    "note": "A synthetic, non-functional token-shaped string is appended at run time (never stored in the repository). The secret gate must stop the request before any provider call; the expected outcome is a failed record naming the gate."
+  },
+  "parser_controls": [
+    {
+      "control_id": "ctl-parse-01",
+      "kind": "prose_instead_of_json",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "The answer is mostly correct, so I would give it a high score.",
+      "expected": "reject"
+    },
+    {
+      "control_id": "ctl-parse-02",
+      "kind": "truncated_json",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "{\"fact_verdicts\": {\"f1\": \"supported\", \"f2\": \"supp",
+      "expected": "reject"
+    },
+    {
+      "control_id": "ctl-parse-03",
+      "kind": "unknown_and_missing_fact_ids",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "{\"fact_verdicts\": {\"f1\": \"supported\", \"f2\": \"supported\", \"f9\": \"supported\"}, \"groundedness\": 2, \"abstained\": false, \"response_type\": \"answered\"}",
+      "expected": "reject"
+    },
+    {
+      "control_id": "ctl-parse-04",
+      "kind": "missing_response_type",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "{\"fact_verdicts\": {\"f1\": \"supported\", \"f2\": \"supported\", \"f3\": \"supported\"}, \"groundedness\": 2, \"abstained\": false}",
+      "expected": "reject"
+    },
+    {
+      "control_id": "ctl-parse-05",
+      "kind": "response_type_contradicts_abstained",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "{\"fact_verdicts\": {\"f1\": \"supported\", \"f2\": \"supported\", \"f3\": \"supported\"}, \"groundedness\": 2, \"abstained\": true, \"response_type\": \"answered\"}",
+      "expected": "reject"
+    },
+    {
+      "control_id": "ctl-parse-06",
+      "kind": "groundedness_out_of_range",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "{\"fact_verdicts\": {\"f1\": \"supported\", \"f2\": \"supported\", \"f3\": \"supported\"}, \"groundedness\": 5, \"abstained\": false, \"response_type\": \"answered\"}",
+      "expected": "reject"
+    },
+    {
+      "control_id": "ctl-parse-07",
+      "kind": "unexpected_extra_field",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "{\"fact_verdicts\": {\"f1\": \"supported\", \"f2\": \"supported\", \"f3\": \"supported\"}, \"groundedness\": 2, \"abstained\": false, \"response_type\": \"answered\", \"confidence\": 0.9}",
+      "expected": "reject"
+    },
+    {
+      "control_id": "ctl-parse-08",
+      "kind": "invalid_verdict_value",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "{\"fact_verdicts\": {\"f1\": \"partially\", \"f2\": \"supported\", \"f3\": \"supported\"}, \"groundedness\": 2, \"abstained\": false, \"response_type\": \"answered\"}",
+      "expected": "reject"
+    },
+    {
+      "control_id": "ctl-parse-09",
+      "kind": "valid_fenced_json",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "```json\n{\"fact_verdicts\": {\"f1\": \"supported\", \"f2\": \"supported\", \"f3\": \"supported\"}, \"groundedness\": 2, \"abstained\": false, \"response_type\": \"answered\"}\n```",
+      "expected": "accept"
+    },
+    {
+      "control_id": "ctl-parse-10",
+      "kind": "valid_plain_json",
+      "repository_id": "inventory-orders",
+      "question_id": "io-discount-tiers",
+      "raw_output": "{\"fact_verdicts\": {\"f1\": \"supported\", \"f2\": \"supported\", \"f3\": \"supported\"}, \"groundedness\": 2, \"abstained\": false, \"response_type\": \"answered\"}",
+      "expected": "accept"
+    }
+  ]
+}

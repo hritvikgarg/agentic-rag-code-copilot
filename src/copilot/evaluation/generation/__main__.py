@@ -9,6 +9,9 @@
 * ``judge``          judge a run's answers (hosted Gemini or local Ollama judge; the judge is chosen
                      with ``--judge-provider``/``--judge-model``, never by the generation model).
 * ``judge-preflight`` check a local judge runtime (metadata only; never pulls a model).
+* ``judge-controls`` run the synthetic judge controls (separate namespace; local or hosted judge).
+* ``judge-validate`` evaluate the artifacts against the predeclared validation specification
+                     (offline; reads existing artifacts only).
 * ``judge-compare``  per-answer comparison of two judges on the same generated answers (offline).
 * ``report``         analysis from run and judgement files (offline).
 * ``audit-worksheet`` / ``audit-agree`` / ``audit-rule-check``  the human audit (offline).
@@ -67,11 +70,30 @@ from copilot.evaluation.generation.inventory import build_inventory
 from copilot.evaluation.generation.judge import JudgeCache, LLMJudge
 from copilot.evaluation.generation.judge_compare import compare_judgements
 from copilot.evaluation.generation.judge_compare import render_text as render_comparison
+from copilot.evaluation.generation.judge_controls import (
+    CONTROLS_PATH,
+    ControlsError,
+    check_against_benchmarks,
+    controls_sha256,
+    load_controls,
+    load_results,
+    results_path,
+    run_controls,
+)
 from copilot.evaluation.generation.judge_preflight import run_preflight
 from copilot.evaluation.generation.judge_selection import (
     JudgeSelection,
     check_judgements_dir,
     resolve_judge,
+)
+from copilot.evaluation.generation.judge_validation import (
+    VALIDATION_SPEC_PATH,
+    ValidationInputs,
+    ValidationSpecError,
+    evaluate_primary_audit,
+    evaluate_validation,
+    load_validation_spec,
+    spec_sha256,
 )
 from copilot.evaluation.generation.judging import (
     JudgementMismatchError,
@@ -521,6 +543,113 @@ def _cmd_judge_preflight(args: argparse.Namespace, settings: Settings) -> int:
     return 0 if result["ok"] else 3
 
 
+def _benchmarks(protocol: PrimaryProtocol, root: Path, settings: Settings, names: Sequence[str]):
+    """``(questions, references)`` per repository id, from the verified frozen benchmarks."""
+    questions: dict[str, dict] = {}
+    references: dict[str, dict] = {}
+    for spec in _selected(protocol, names):
+        bench, files = _check_benchmark(spec, root, settings)
+        questions[spec.repository_id] = {q.id: q for q in bench.questions}
+        references[spec.repository_id] = {q.id: build_reference(q, files) for q in bench.questions}
+    return questions, references
+
+
+def _cmd_judge_controls(args: argparse.Namespace, settings: Settings) -> int:
+    root = Path(args.root)
+    protocol = load_protocol(root / args.protocol)
+    if args.repeat:  # an independent second pass: no cache, model unloaded between requests
+        args.no_cache = True
+        if args.judge_keep_alive is None:
+            args.judge_keep_alive = "0"
+    selection = _judge_selection(args, settings, protocol, root, None)
+    primary = (root / DEFAULT_OUTPUT_DIR).resolve()
+    target = selection.judgements_dir.resolve()
+    if target == primary or target.is_relative_to(primary):
+        raise ValueError("the control directory must not be inside the primary directory")
+    controls = load_controls(root / CONTROLS_PATH)
+    validation_hash = spec_sha256(root / VALIDATION_SPEC_PATH)
+    questions, references = _benchmarks(protocol, root, settings, [])
+    pilot_path = root / PILOT_SPEC_PATH
+    excluded = load_pilot_spec(pilot_path).questions if pilot_path.is_file() else {}
+    check_against_benchmarks(controls, questions, excluded)
+    llm = _judge_client(selection)
+    judge = LLMJudge(
+        llm, max_output_tokens=selection.max_output_tokens, retry_policy=_retry(args),
+        cache=JudgeCache(selection.cache_dir) if selection.cache_dir is not None else None,
+    )  # fmt: skip
+    label = "repeat" if args.repeat else "pass1"
+    path = results_path(selection.judgements_dir, label)
+    prior = load_results(path) if path.is_file() else None
+    run = run_controls(
+        controls, judge, questions, references, pass_label=label,
+        spec_sha256=controls_sha256(root / CONTROLS_PATH), validation_spec_sha256=validation_hash,
+        checkpoint_path=path, prior=prior, progress=lambda m: print(m, file=sys.stderr),
+    )  # fmt: skip
+    print(json.dumps(run.summary(), indent=2))
+    print(f"wrote {path}")
+    return 0
+
+
+def _cmd_judge_validate(args: argparse.Namespace, settings: Settings) -> int:
+    root = Path(args.root)
+    protocol = load_protocol(root / args.protocol)
+    spec = load_validation_spec(root / VALIDATION_SPEC_PATH)
+    spec_hash = spec_sha256(root / VALIDATION_SPEC_PATH)
+    inputs = ValidationInputs(
+        controls_dir=args.controls_dir, controls_repeat_dir=args.controls_repeat_dir,
+        pilot_dir=args.pilot_dir, pilot_repeat_dir=args.pilot_repeat_dir,
+    )  # fmt: skip
+
+    def controls(directory: str | None, label: str):
+        if not directory:
+            return None
+        run = load_results(results_path(root / directory, label))
+        if run.validation_spec_sha256 != spec_hash:
+            raise ControlsError(
+                f"{label}: the controls were judged under a different validation specification"
+            )
+        return run
+
+    inputs.controls = controls(args.controls_dir, "pass1")
+    inputs.controls_repeat = controls(args.controls_repeat_dir, "repeat")
+    inputs.questions, _ = _benchmarks(protocol, root, settings, args.repository)
+
+    def pilot_files(directory: str | None):
+        found = {}
+        for repo in inputs.questions:
+            path = judgement_path(root / directory, repo) if directory else None
+            if path is not None and path.is_file():
+                found[repo] = load_judgements(path)
+        return found
+
+    inputs.pilot = pilot_files(args.pilot_dir)
+    inputs.pilot_repeat = pilot_files(args.pilot_repeat_dir)
+    agreement_path = (
+        Path(args.agreement) if args.agreement
+        else (root / args.pilot_dir / "audit-agreement-PILOT.json" if args.pilot_dir else None)
+    )  # fmt: skip
+    if agreement_path is not None and agreement_path.is_file():
+        inputs.agreement = json.loads(agreement_path.read_text(encoding="utf-8"))
+    report = evaluate_validation(spec, inputs, spec_hash)
+    if args.primary_agreement:
+        primary = json.loads(Path(args.primary_agreement).read_text(encoding="utf-8"))
+        report["primary_audit"] = evaluate_primary_audit(spec, primary)
+    anchor = args.pilot_dir or args.controls_dir
+    target = (
+        Path(args.report)
+        if args.report
+        else (root / anchor / "judge-validation-report.json" if anchor else None)
+    )  # noqa: E501
+    text = json.dumps(report, indent=2, ensure_ascii=False)
+    if target is not None:
+        write_text_atomically(target, text + "\n")
+    print(text)
+    primary_fail = report.get("primary_audit", {}).get("status") == "FAIL"
+    if report["overall"] == "FAIL" or primary_fail:
+        return 3
+    return 0 if report["overall"] == "PILOT_CRITERIA_MET" else 4
+
+
 def _cmd_judge_compare(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.root)
     out_dir = root / args.output_dir
@@ -865,6 +994,28 @@ def _parser() -> argparse.ArgumentParser:
                            help="load the model with one constant, "
                            "repository-free prompt")  # fmt: skip
 
+    controls = sub.add_parser("judge-controls", help="run the synthetic judge controls")
+    common(controls)
+    retry_flags(controls)
+    judge_flags(controls)
+    controls.add_argument("--confirm-model", help="unused; accepted for symmetry with judge")
+    controls.add_argument("--repeat", action="store_true",
+                          help="independent second pass: no cache, model unloaded between "
+                          "requests")  # fmt: skip
+
+    validate = sub.add_parser(
+        "judge-validate", help="evaluate artifacts against the predeclared plan"
+    )
+    common(validate)
+    validate.add_argument("--controls-dir", help="directory of the first control pass")
+    validate.add_argument("--controls-repeat-dir", help="directory of the repeat control pass")
+    validate.add_argument("--pilot-dir", help="the local judge's pilot judgements directory")
+    validate.add_argument("--pilot-repeat-dir", help="the repeat pilot judgements directory")
+    validate.add_argument("--agreement", help="pilot audit-agree result (default: in --pilot-dir)")
+    validate.add_argument("--primary-agreement", help="also apply the primary-audit criteria to "
+                          "this audit-agree result")  # fmt: skip
+    validate.add_argument("--report", help="where to write the report")
+
     compare = sub.add_parser("judge-compare", help="per-answer comparison of two judges (offline)")
     common(compare)
     pilot_flags(compare)
@@ -915,6 +1066,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "run": _cmd_run,
         "judge": _cmd_judge,
         "judge-preflight": _cmd_judge_preflight,
+        "judge-controls": _cmd_judge_controls,
+        "judge-validate": _cmd_judge_validate,
         "judge-compare": _cmd_judge_compare,
         "report": _cmd_report,
         "audit-worksheet": _cmd_audit_worksheet,
@@ -929,6 +1082,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         SecurityError, LLMError, ValueError, BenchmarkFormatError, RunMismatchError,
         JudgementMismatchError, EvaluationError, FileNotFoundError, PilotMismatchError,
+        ControlsError, ValidationSpecError,
     ) as exc:  # fmt: skip
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
