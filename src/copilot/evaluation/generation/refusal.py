@@ -15,10 +15,13 @@ Whether an answer *abstains* is a separate question from whether it is *correct*
   provider, was never attempted, or returned nothing. **A missing response is not a refusal** and is
   excluded from every rate.
 
-The classifier is a deterministic, cue-based first pass with known limits (paraphrased abstentions
-are missed; an answer that merely *mentions* insufficiency can be mislabelled). It exists to give a
-reproducible, judge-independent view and a cross-check on the judge's own ``abstained`` flag; the
-primary analysis may use either source, and disagreements are reportable.
+The cue-based classifier is a deterministic first pass with known limits (paraphrased abstentions
+are missed; an answer that merely *mentions* insufficiency can be mislabelled). **It is a
+diagnostic only.** The primary abstention metrics label a generated response from the judge's
+``response_type`` (prompt ``gen-judge-2``), a system abstention deterministically, and a response
+with no valid judge rating as ``unrated`` - the cue rules are never substituted for a missing
+rating. The cue-rule metrics, their disagreements with the judge and the unrated count are
+reported next to the primary metrics (see ``analysis``).
 
 Rates (each ``None`` when its denominator is zero):
 
@@ -39,14 +42,16 @@ from typing import Literal
 
 from copilot.rag.citations import extract_source_numbers
 
-Label = Literal["answered", "insufficient_evidence", "generic_refusal", "ambiguous", "no_response"]
+Label = Literal[
+    "answered", "insufficient_evidence", "generic_refusal", "ambiguous", "no_response", "unrated"
+]
 State = Literal["successful", "failed", "not_attempted"]
 
 _INSUFFICIENT = [
     re.compile(p, re.I)
     for p in (
         r"\b(?:evidence|sources?|context|excerpts?|files?|code|repository|retrieved|provided|supplied)\b"
-        r"[^.\n]{0,60}\b(?:does|do|did)\s+not\s+(?:show|contain|include|mention|provide|specify|state|cover|describe|reveal)",
+        r"[^.\n]{0,60}\b(?:does|do|did)\s+not\s+(?:show|contain|include|mention|provide|specify|state|cover|describe|reveal|say)",
         r"\b(?:no|insufficient|not\s+enough|limited)\s+(?:repository\s+)?(?:evidence|information)\b",
         r"\b(?:cannot|can't|can\s+not|unable\s+to|not\s+able\s+to|couldn't)\s+"
         r"(?:determine|tell|find|confirm|verify|answer|say|know|see)\b[^.\n]{0,100}"
@@ -57,6 +62,12 @@ _INSUFFICIENT = [
         r"(?:repository|provided|supplied|retrieved|evidence|sources?|code|files?)\b",
         r"\bwithout\s+(?:seeing|access\s+to|the)\s+(?:the\s+)?(?:repository|code|files?|source)\b",
         r"\binsufficient\s+(?:repository\s+)?evidence\b",
+        r"\bnothing\s+in\s+(?:the\s+)?(?:repository|code(?:base)?|files?|sources?|evidence|"
+        r"retrieved\s+\w+|provided\s+\w+)\s+(?:shows?|says?|states?|mentions?|indicates?|"
+        r"describes?|specif(?:y|ies)|reveals?)\b",
+        r"\bno\s+(?:mention|indication|reference|record|trace|sign|information)\s+of\b[^.\n]{0,80}"
+        r"\b(?:in|within)\s+(?:the\s+)?(?:repository|code(?:base)?|files?|sources?|evidence|"
+        r"retrieved|provided)\b",
     )
 ]
 _GENERIC_REFUSAL = [
@@ -107,6 +118,8 @@ class AbstentionMetrics:
     false_refusals: int  # answerable + (insufficient_evidence | generic_refusal)
     ambiguous_answerable: int
     ambiguous_unanswerable: int
+    unrated_answerable: int = 0  # text exists but no valid judge rating: never classified
+    unrated_unanswerable: int = 0
 
     @staticmethod
     def _rate(num: int, den: int) -> float | None:
@@ -141,12 +154,18 @@ class AbstentionMetrics:
 
 
 def abstention_metrics(items: Iterable[tuple[bool, Label]]) -> AbstentionMetrics:
-    """Aggregate ``(question_is_answerable, label)`` pairs into the metrics above."""
+    """Aggregate ``(question_is_answerable, label)`` pairs into the metrics above.
+
+    ``no_response`` and ``unrated`` items are counted but excluded from every rate denominator.
+    """
     counts = dict.fromkeys(AbstentionMetrics.__dataclass_fields__, 0)
     for answerable, label in items:
         counts["answerable_total" if answerable else "unanswerable_total"] += 1
         if label == "no_response":
             counts["no_response_answerable" if answerable else "no_response_unanswerable"] += 1
+            continue
+        if label == "unrated":
+            counts["unrated_answerable" if answerable else "unrated_unanswerable"] += 1
             continue
         counts["answerable_evaluable" if answerable else "unanswerable_evaluable"] += 1
         if label == "ambiguous":

@@ -11,6 +11,21 @@ combined. Pairs with a missing, failed or unscored side are **listed and counted
 dropped and never imputed**; end-to-end reliability is reported separately from the
 successful-answer analysis.
 
+**Abstention labels.** A generated response with a valid judge rating is labelled from the judge's
+``response_type`` (the primary classification); a system abstention (the model was not called) is
+labelled deterministically; a response with text but no valid judge rating is ``unrated`` - the cue
+rules are *never* substituted. The cue-rule labels are reported separately as a diagnostic, with the
+disagreements and concordance counts against the judge.
+
+**Groundedness** is reported in two forms: overall (every scored row, including rule-scored system
+abstentions, which make no claims and so get groundedness 2 by convention) and over *substantive
+generated answers* only (judge/human scored, not abstaining). Read it together with correctness,
+completeness and the false-refusal rate: a high groundedness from abstaining is not quality.
+
+**Historical sensitivity.** Reused historical responses (``origin="historical"``) are kept in the
+primary analysis; a sensitivity analysis repeats the primary endpoint excluding every question that
+has a reused side, so the effect of reuse is visible.
+
 **What this module does not do:** it declares no winner. It states the estimate, the interval and
 whether the interval excludes zero, and lists the caveats that apply (test artifact, synthetic
 repository, same-family judge, unconfirmed model, incomplete pairs, reused historical answers).
@@ -31,7 +46,7 @@ from copilot.evaluation.generation.inventory import RepoInventory
 from copilot.evaluation.generation.judging import JudgedItem, JudgementFile
 from copilot.evaluation.generation.protocol import PrimaryProtocol, protocol_hash
 from copilot.evaluation.generation.references import find_references
-from copilot.evaluation.generation.refusal import abstention_metrics, classify_response
+from copilot.evaluation.generation.refusal import Label, abstention_metrics, classify_response
 from copilot.evaluation.generation.rubric import EvaluationError, score_assessment
 from copilot.evaluation.generation.schema import GenerationQuestion
 from copilot.evaluation.stats import bootstrap_ci, bootstrap_indices
@@ -76,6 +91,7 @@ def _score_of(question: GenerationQuestion, item: JudgedItem | None) -> tuple[st
         "completeness": result.completeness,
         "groundedness": item.assessment.groundedness,
         "judged_abstained": item.assessment.abstained,
+        "judged_response_type": item.assessment.response_type,
         "unsupported_claims": result.material_unsupported,
         "evaluator_kind": item.assessment.evaluator_kind,
     }
@@ -85,7 +101,7 @@ def _text_metrics(
     question: GenerationQuestion, side: SideRecord, inventory: RepoInventory
 ) -> dict[str, object]:
     out: dict[str, object] = {}
-    out["abstention_label"] = classify_response(
+    out["abstention_label_regex"] = classify_response(
         side.answer, state=side.state, system_insufficient=side.system_insufficient
     ).label
     if not side.has_text:
@@ -123,6 +139,31 @@ def _text_metrics(
     return out
 
 
+_JUDGE_LABELS: dict[str, Label] = {
+    "answered": "answered",
+    "insufficient_evidence": "insufficient_evidence",
+    "generic_refusal": "generic_refusal",
+    "mixed": "ambiguous",  # part answer, part abstention: reported as ambiguous, never forced
+    "ambiguous": "ambiguous",
+}
+
+
+def primary_abstention_label(side: SideRecord, fields: Mapping[str, object]) -> tuple[Label, str]:
+    """``(label, source)``: system rule, the judge's ``response_type``, or ``unrated``/none.
+
+    The cue rules are never used here. A judge ``abstained`` flag alone is not enough: only a valid
+    ``response_type`` classifies a generated response.
+    """
+    if side.system_insufficient:
+        return "insufficient_evidence", "system"
+    if not side.has_text:
+        return "no_response", "none"
+    response_type = fields.get("judged_response_type")
+    if fields.get("evaluator_kind") in ("judge", "human") and response_type in _JUDGE_LABELS:
+        return _JUDGE_LABELS[str(response_type)], "judge"
+    return "unrated", "none"
+
+
 def build_rows(inputs: RepoInputs) -> list[dict[str, object]]:
     """One row per (question, arm): scores, programmatic metrics, usage and provenance."""
     run = inputs.run
@@ -149,6 +190,12 @@ def build_rows(inputs: RepoInputs) -> list[dict[str, object]]:
                 **fields,
             }
             row.update(_text_metrics(question, side, inputs.inventory))
+            label, label_source = primary_abstention_label(side, fields)
+            row["abstention_label"] = label
+            row["abstention_label_source"] = label_source
+            judge_like = fields.get("evaluator_kind") in ("judge", "human")
+            if judge_like and not fields.get("judged_abstained"):
+                row["groundedness_substantive"] = fields.get("groundedness")
             if arm == "rag" and question.is_answerable:
                 row["retrieval_hit"] = (
                     side.first_relevant_source is not None if side.state == "successful" else None
@@ -251,10 +298,115 @@ def _reliability(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
             "requested": len(subset),
             "success_rate": _rate(counts["successful"], len(subset)),
             "judge_failed": sum(1 for r in subset if r["score_state"] == "judge_failed"),
+            "new_generated": sum(
+                1 for r in subset if r["origin"] == "generated" and r["side_state"] == "successful"
+            ),
             "reused_historical": sum(1 for r in subset if r["origin"] == "historical"),
             "served_from_cache": sum(1 for r in subset if r["origin"] == "cache"),
         }
     return out
+
+
+def _label_sources(subset: Sequence[Mapping[str, object]]) -> dict[str, int]:
+    """How each response got its primary label (denominators for the abstention metrics)."""
+    labelled = [r for r in subset if "abstention_label_source" in r]
+    return {
+        "system_rule": sum(1 for r in labelled if r["abstention_label_source"] == "system"),
+        "judge_response_type": sum(1 for r in labelled if r["abstention_label_source"] == "judge"),
+        "unrated_missing_judge_rating": sum(
+            1 for r in labelled if r["abstention_label"] == "unrated"
+        ),
+        "no_response": sum(1 for r in labelled if r["abstention_label"] == "no_response"),
+        "total": len(labelled),
+    }
+
+
+def concordance(subset: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Judge ``response_type`` labels vs the cue-rule labels, judge-classified responses only.
+
+    System abstentions are excluded (both sides are deterministic there) and an unrated response
+    is never compared. ``regex_*`` is a diagnostic, never the reference.
+    """
+    judged = [
+        r for r in subset
+        if r.get("abstention_label_source") == "judge" and "abstention_label_regex" in r
+    ]  # fmt: skip
+    confusion: dict[str, int] = {}
+    disagreements: list[dict[str, object]] = []
+    for r in judged:
+        key = f"judge={r['abstention_label']} regex={r['abstention_label_regex']}"
+        confusion[key] = confusion.get(key, 0) + 1
+        if r["abstention_label"] != r["abstention_label_regex"]:
+            disagreements.append(
+                {k: r[k] for k in ("repository_id", "question_id", "arm")}
+                | {"judge": r["abstention_label"], "regex": r["abstention_label_regex"]}
+            )
+    agree = len(judged) - len(disagreements)
+    return {
+        "compared": len(judged),
+        "agree": agree,
+        "agreement_rate": _rate(agree, len(judged)),
+        "disagreements": disagreements,
+        "confusion": dict(sorted(confusion.items())),
+        "unrated_not_compared": sum(1 for r in subset if r.get("abstention_label") == "unrated"),
+        "system_not_compared": sum(
+            1 for r in subset if r.get("abstention_label_source") == "system"
+        ),
+    }
+
+
+def groundedness_composition(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Per arm: who scored groundedness, with denominators and the means for each subset."""
+    out: dict[str, object] = {}
+    for arm in ("plain", "rag"):
+        subset = _arm_rows(rows, arm)
+        scored = [r for r in subset if r.get("score_state") == "scored"]
+        judge_scored = [r for r in scored if r.get("evaluator_kind") in ("judge", "human")]
+        rule_scored = [r for r in scored if r.get("evaluator_kind") == "rule"]
+        substantive = [r for r in judge_scored if r.get("groundedness_substantive") is not None]
+        out[arm] = {
+            "responses": len(subset),
+            "without_a_response": sum(1 for r in subset if r["side_state"] != "successful"),
+            "missing_judge_ratings": sum(
+                1
+                for r in subset
+                if r["side_state"] == "successful"
+                and r.get("score_state") in ("judge_failed", "not_judged")
+            ),  # fmt: skip
+            "scored_overall": len(scored),
+            "judge_scored": len(judge_scored),
+            "rule_scored_system_abstentions": len(rule_scored),
+            "judge_scored_abstaining": len(judge_scored) - len(substantive),
+            "substantive_generated": len(substantive),
+            "mean_overall": _mean([float(r["groundedness"]) for r in scored]),
+            "mean_substantive": _mean([float(r["groundedness_substantive"]) for r in substantive]),
+            "mean_rule_scored": _mean([float(r["groundedness"]) for r in rule_scored]),
+        }
+    return out
+
+
+def historical_sensitivity(
+    rows: Sequence[Mapping[str, object]], *, seed: int, resamples: int, confidence: float
+) -> dict[str, object]:
+    """Primary endpoint with and without questions that have a reused historical response."""
+    historical = {
+        (r["repository_id"], r["question_id"]) for r in rows if r.get("origin") == "historical"
+    }
+    all_pairs, _ = _pairs(rows, "score", answerable_only=True)
+    kept = [r for r in rows if (r["repository_id"], r["question_id"]) not in historical]
+    kept_pairs, _ = _pairs(kept, "score", answerable_only=True)
+    return {
+        "historical_sides": sum(1 for r in rows if r.get("origin") == "historical"),
+        "questions_with_a_historical_side": len(historical),
+        "complete_pairs_excluded": len(all_pairs) - len(kept_pairs),
+        "excluded_question_ids": sorted(f"{repo}/{qid}" for repo, qid in historical),
+        "primary_all": paired_summary(
+            all_pairs, seed=seed, resamples=resamples, confidence=confidence
+        ),
+        "primary_excluding_historical": paired_summary(
+            kept_pairs, seed=seed, resamples=resamples, confidence=confidence
+        ),
+    }
 
 
 def _arm_secondary(rows: Sequence[Mapping[str, object]], arm: str) -> dict[str, object]:
@@ -266,6 +418,11 @@ def _arm_secondary(rows: Sequence[Mapping[str, object]], arm: str) -> dict[str, 
         (bool(r["answerable"]), r["abstention_label"])  # type: ignore[misc]
         for r in subset
         if "abstention_label" in r
+    )
+    regex = abstention_metrics(
+        (bool(r["answerable"]), r["abstention_label_regex"])  # type: ignore[misc]
+        for r in subset
+        if "abstention_label_regex" in r
     )
     hits = [r["retrieval_hit"] for r in subset if r.get("retrieval_hit") is not None]
     latencies = [float(r["latency_seconds"]) for r in subset if "latency_seconds" in r]
@@ -283,6 +440,9 @@ def _arm_secondary(rows: Sequence[Mapping[str, object]], arm: str) -> dict[str, 
             "answers_with_not_found": sum(1 for r in subset if int(r.get("refs_not_found", 0)) > 0),
         },
         "abstention": abst.to_json(),
+        "abstention_sources": _label_sources(subset),
+        "abstention_regex_diagnostic": regex.to_json(),
+        "abstention_concordance": concordance(subset),
         "latency_seconds": {
             "n": len(latencies),
             "mean": _mean(latencies),
@@ -321,6 +481,7 @@ def analyse(rows: Sequence[Mapping[str, object]], protocol: PrimaryProtocol) -> 
     def block(subset: Sequence[Mapping[str, object]]) -> dict[str, object]:
         pairs, excluded = _pairs(subset, "score", answerable_only=True)
         g_pairs, _ = _pairs(subset, "groundedness")
+        gs_pairs, _ = _pairs(subset, "groundedness_substantive")
         c_pairs, _ = _pairs(subset, "completeness", answerable_only=True)
         h_pairs, _ = _pairs([r for r in subset if "refs_not_found" in r], "refs_not_found")
         return {
@@ -335,6 +496,9 @@ def analyse(rows: Sequence[Mapping[str, object]], protocol: PrimaryProtocol) -> 
                 "groundedness": paired_summary(
                     g_pairs, seed=seed, resamples=resamples, confidence=conf
                 ),
+                "groundedness_substantive": paired_summary(
+                    gs_pairs, seed=seed, resamples=resamples, confidence=conf
+                ),
                 "completeness": paired_summary(
                     c_pairs, seed=seed, resamples=resamples, confidence=conf
                 ),
@@ -342,6 +506,10 @@ def analyse(rows: Sequence[Mapping[str, object]], protocol: PrimaryProtocol) -> 
                     h_pairs, seed=seed, resamples=resamples, confidence=conf
                 ),
             },
+            "groundedness_composition": groundedness_composition(subset),
+            "historical_sensitivity": historical_sensitivity(
+                subset, seed=seed, resamples=resamples, confidence=conf
+            ),
             "per_arm": {arm: _arm_secondary(subset, arm) for arm in ("plain", "rag")},
             "reliability": _reliability(subset),
         }
@@ -388,6 +556,21 @@ def caveats(
     reused = sum(reliability[a]["reused_historical"] for a in ("plain", "rag"))  # type: ignore[index]
     if reused:
         out.append(f"{reused} side(s) were reused from earlier verified historical responses.")
+        out.append(
+            "Reused historical responses came from a hosted model that may have drifted since, and "
+            "their packed prompt was not recorded in full (only pinned prompt-template digests, "
+            "the question, the index and the retrieved chunk ids). See the historical sensitivity "
+            "analysis, which excludes every question with a reused side."
+        )
+    per_arm = combined["per_arm"]  # type: ignore[index]
+    unrated = sum(
+        per_arm[a]["abstention_sources"]["unrated_missing_judge_rating"] for a in ("plain", "rag")
+    )
+    if unrated:
+        out.append(
+            f"{unrated} response(s) have no valid judge rating and are 'unrated' in the abstention "
+            "metrics; the cue-rule labels are a diagnostic and are not substituted."
+        )
     out.extend(protocol.limitations)
     return out
 
@@ -473,19 +656,69 @@ def render_markdown(report: Mapping[str, object]) -> str:
             f"- {name}: n={summary['n']}, mean difference (RAG - plain)="
             f"{_fmt(summary['mean_difference'])}"
         )
+    lines += ["", "### Groundedness: two forms", "",
+              "| arm | responses | scored | judge-scored | rule-scored abstentions | "
+              "substantive generated | missing judge ratings | mean (overall) | "
+              "mean (substantive) |",
+              "|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
+    for arm in ("plain", "rag"):
+        c = combined["groundedness_composition"][arm]
+        lines.append(
+            f"| {arm} | {c['responses']} | {c['scored_overall']} | {c['judge_scored']} | "
+            f"{c['rule_scored_system_abstentions']} | {c['substantive_generated']} | "
+            f"{c['missing_judge_ratings']} | {_fmt(c['mean_overall'])} | "
+            f"{_fmt(c['mean_substantive'])} |"
+        )
+    lines += ["", "Interpretation: *overall* groundedness includes rule-scored system abstentions, "
+              "which make no claims and receive groundedness 2 by convention - an abstention on an "
+              "answerable question therefore raises this number while correctness is 0. "
+              "*Substantive* groundedness covers judge-scored, non-abstaining answers only. Read "
+              "either together with correctness, completeness and the false-refusal rate; neither "
+              "is a quality score on its own.", ""]  # fmt: skip
+    lines += ["### Abstention (primary = judge `response_type` / system rule)", ""]
     for arm in ("plain", "rag"):
         arm_block = combined["per_arm"][arm]
         abst = arm_block["abstention"]
+        src = arm_block["abstention_sources"]
+        regex = arm_block["abstention_regex_diagnostic"]
+        conc = arm_block["abstention_concordance"]
         lines.append(
-            f"- {arm}: appropriate abstention rate={_fmt(abst['appropriate_abstention_rate'])}, "
-            f"false refusal rate={_fmt(abst['false_refusal_rate'])}, "
-            f"unsupported answer rate={_fmt(abst['unsupported_answer_rate'])}, "
-            f"invented citations={arm_block['citations']['invented_citations']}, "
+            f"- {arm}: appropriate abstention rate={_fmt(abst['appropriate_abstention_rate'])} "
+            f"(of {abst['unanswerable_evaluable']} unanswerable), "
+            f"false refusal rate={_fmt(abst['false_refusal_rate'])} "
+            f"(of {abst['answerable_evaluable']} answerable), "
+            f"unsupported answer rate={_fmt(abst['unsupported_answer_rate'])}; "
+            f"labels from judge={src['judge_response_type']}, system rule={src['system_rule']}, "
+            f"unrated (no valid judge rating)={src['unrated_missing_judge_rating']}, "
+            f"no response={src['no_response']}"
+        )
+        lines.append(
+            f"  - cue-rule diagnostic (not a metric of record): appropriate abstention="
+            f"{_fmt(regex['appropriate_abstention_rate'])}, false refusal="
+            f"{_fmt(regex['false_refusal_rate'])}; vs judge: {conc['agree']}/{conc['compared']} "
+            f"agree ({len(conc['disagreements'])} disagreement(s))"
+        )
+        lines.append(
+            f"  - invented citations={arm_block['citations']['invented_citations']}, "
             f"references not found={arm_block['hallucinated_references']['not_found_total']}"
         )
     if "retrieval" in combined["per_arm"]["rag"]:
         lines.append(f"- RAG retrieval hit@k (answerable): "
                      f"{_fmt(combined['per_arm']['rag']['retrieval']['hit_at_k'])}")  # fmt: skip
+    sens = combined["historical_sensitivity"]
+    lines += ["", "## Historical-response sensitivity", "",
+              f"{sens['historical_sides']} reused historical side(s) across "
+              f"{sens['questions_with_a_historical_side']} question(s); "
+              f"{sens['complete_pairs_excluded']} complete pair(s) excluded below.", "",
+              "| analysis | n | RAG - plain | 95% CI |", "|---|---|---|---|"]  # fmt: skip
+    variants = (
+        ("primary (all pairs)", "primary_all"),
+        ("excluding questions with a reused response", "primary_excluding_historical"),
+    )
+    for label, key in variants:
+        p = sens[key]
+        ci = "n/a" if p["ci_low"] is None else f"[{_fmt(p['ci_low'])}, {_fmt(p['ci_high'])}]"
+        lines.append(f"| {label} | {p['n']} | {_fmt(p['mean_difference'])} | {ci} |")
     lines += ["", "## Caveats", ""] + [f"- {c}" for c in report["caveats"]]  # type: ignore[union-attr]
     lines += ["", "Every figure above is recomputable from the `rows` in the JSON report, which "
               "reference the raw run and judgement files by path and SHA-256.", ""]  # fmt: skip
