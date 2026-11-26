@@ -116,7 +116,10 @@ def pytest_collection_modifyitems(config, items):
     ``live`` (real embedding model): ``COPILOT_RUN_LIVE=1`` (the first run downloads ~0.64 GB).
     ``llm_live`` (hosted LLM call): ``COPILOT_RUN_LLM_LIVE=1``; the test itself also needs
     ``COPILOT_LLM_MODEL`` and ``GEMINI_API_KEY`` and skips with a clear reason without them.
+
+    It also refuses oversized generated test ids (``check_test_id_lengths``).
     """
+    check_test_id_lengths(items)
     skip_live = pytest.mark.skip(
         reason="live test: set COPILOT_RUN_LIVE=1 to run (downloads the model)"
     )
@@ -129,3 +132,20 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_live)
         if "llm_live" in item.keywords and os.environ.get("COPILOT_RUN_LLM_LIVE") != "1":
             item.add_marker(skip_llm)
+
+
+# pytest stores the running test's id in the PYTEST_CURRENT_TEST environment variable, and Windows
+# refuses values of 32767 characters or more (``ValueError`` from ``putenv``, which then shows up as
+# setup/teardown errors). Parametrized string arguments become part of the id, so a large input must
+# be given a short explicit ``id=``. Fail collection long before the OS limit is reached.
+MAX_TEST_ID_CHARS = 8_000
+
+
+def check_test_id_lengths(items: list[pytest.Item]) -> None:
+    """Refuse oversized generated test ids (see ``MAX_TEST_ID_CHARS``)."""
+    for item in items:
+        if len(item.nodeid) > MAX_TEST_ID_CHARS:
+            raise pytest.UsageError(
+                f"test id of {len(item.nodeid)} characters (limit {MAX_TEST_ID_CHARS}) for "
+                f"{item.nodeid[:100]!r}...: give the large parametrized argument a short id="
+            )

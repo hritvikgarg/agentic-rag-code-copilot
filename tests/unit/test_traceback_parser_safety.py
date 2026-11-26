@@ -348,7 +348,15 @@ EXCEPTION_GROUP = """\
 """
 
 
-@pytest.mark.parametrize("text", [PYTEST_STYLE, IPYTHON_STYLE, JS_STYLE, JAVA_STYLE])
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(PYTEST_STYLE, id="pytest"),
+        pytest.param(IPYTHON_STYLE, id="ipython"),
+        pytest.param(JS_STYLE, id="javascript"),
+        pytest.param(JAVA_STYLE, id="java"),
+    ],
+)
 def test_foreign_formats_are_reported_as_unsupported(text):
     result = parse_traceback(text)
     assert result.status is ParseStatus.FAILED and result.segments == ()
@@ -383,18 +391,22 @@ def test_non_string_input_is_a_programming_error():
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        (tb.REAL_CHAINED, True),
-        (tb.REAL_SYNTAX_HEADERLESS, True),  # a frame line is enough
-        ('  File "a.py", line 3, in f', True),
-        ("Traceback (most recent call last):", True),
-        ("   Traceback (most recent call last):   ", True),
-        ("", False),
-        ("hello", False),
-        ("File a.py line 3", False),
-        ('File "a.py", line', False),
-        ('File "a.py", line x', False),
-        ("a" * 60_000 + "\nTraceback (most recent call last):", False),  # beyond the window
-        (PYTEST_STYLE, False),
+        pytest.param(tb.REAL_CHAINED, True, id="chained-traceback"),
+        pytest.param(tb.REAL_SYNTAX_HEADERLESS, True, id="frame-line-is-enough"),
+        pytest.param('  File "a.py", line 3, in f', True, id="frame-line-only"),
+        pytest.param("Traceback (most recent call last):", True, id="header-only"),
+        pytest.param("   Traceback (most recent call last):   ", True, id="padded-header"),
+        pytest.param("", False, id="empty"),
+        pytest.param("hello", False, id="prose"),
+        pytest.param("File a.py line 3", False, id="no-quotes"),
+        pytest.param('File "a.py", line', False, id="no-line-number"),
+        pytest.param('File "a.py", line x', False, id="non-numeric-line"),
+        pytest.param(
+            "a" * 60_000 + "\nTraceback (most recent call last):",
+            False,
+            id="header-beyond-the-window",
+        ),
+        pytest.param(PYTEST_STYLE, False, id="pytest-style"),
     ],
 )
 def test_looks_like_traceback(text, expected):

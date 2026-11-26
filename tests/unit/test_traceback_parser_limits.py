@@ -239,14 +239,14 @@ def test_custom_limits_apply():
 @pytest.mark.parametrize(
     "text",
     [
-        'File "' * 8_000,
-        ('File "' + "a" * 1_990 + "\n") * 24,
-        ": " * 24_000,
-        ("Traceback (most recent call last):\n" * 1_400),
-        ('  File "/a.py", line 1, in f\n    x\n' * 1_400),
-        "\x1b[" * 20_000,
-        "^~ " * 16_000,
-        "A" * 49_999 + ":",
+        pytest.param('File "' * 8_000, id="file-prefix-repeated"),
+        pytest.param(('File "' + "a" * 1_990 + "\n") * 24, id="long-unterminated-paths"),
+        pytest.param(": " * 24_000, id="colons"),
+        pytest.param(("Traceback (most recent call last):\n" * 1_400), id="headers-repeated"),
+        pytest.param(('  File "/a.py", line 1, in f\n    x\n' * 1_400), id="frames-repeated"),
+        pytest.param("\x1b[" * 20_000, id="ansi-introducers"),
+        pytest.param("^~ " * 16_000, id="caret-runs"),
+        pytest.param("A" * 49_999 + ":", id="single-long-line"),
     ],
 )
 def test_pathological_inputs_finish_quickly(text):
